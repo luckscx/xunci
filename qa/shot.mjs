@@ -11,19 +11,19 @@ await p.goto('http://127.0.0.1:3110', { waitUntil: 'networkidle' })
 await p.waitForSelector('.chip.cat')
 await p.locator('.mode-btn', { hasText: '猜词' }).click()
 await p.waitForTimeout(400)
-await p.screenshot({ path: '/tmp/ciwen-xunci-idle.png' })
+await p.screenshot({ path: '/tmp/xunci-idle.png' })
 
 for (const w of ['狗', '宠物', '小猫', '钢琴']) {
   await p.fill('.entry input', w)
   await p.click('.entry button')
   await p.waitForTimeout(400)
 }
-await p.screenshot({ path: '/tmp/ciwen-xunci-play.png' })
+await p.screenshot({ path: '/tmp/xunci-play.png' })
 
 // 放弃 → 结算层
 await p.click('.foot .danger')
 await p.waitForTimeout(800)
-await p.screenshot({ path: '/tmp/ciwen-xunci-over.png' })
+await p.screenshot({ path: '/tmp/xunci-over.png' })
 
 console.log('rows', await p.evaluate(() => document.querySelectorAll('.hlist li').length))
 console.log('num', await p.evaluate(() => document.querySelector('.num')?.textContent))

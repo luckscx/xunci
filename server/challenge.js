@@ -229,7 +229,7 @@ function publicState(c) {
     elapsedMs: Math.max(0, (c.finished ? Math.min(c.finishedAt, c.deadline) : Math.min(now, c.deadline)) - c.startedAt),
     score: c.score,
     rank: c.rank,
-    ...(process.env.CIWEN_DEV_HINT === '1' ? { devAnswers: c.levels.map((l) => l.word) } : {}),
+    ...(process.env.XUNCI_DEV_HINT === '1' ? { devAnswers: c.levels.map((l) => l.word) } : {}),
   }
 }
 

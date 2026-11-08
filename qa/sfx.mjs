@@ -72,6 +72,6 @@ await p.click('.snd')
 const r2 = await guess('太阳')
 console.log('恢复后', r2.pct, '振荡器', r2.osc.length, r2.osc.length > 0 ? '✓' : '✗')
 
-await p.screenshot({ path: '/tmp/ciwen-sfx.png' })
+await p.screenshot({ path: '/tmp/xunci-sfx.png' })
 console.log(errs.length ? 'ERR ' + errs.join(' | ') : 'no console errors')
 await b.close()

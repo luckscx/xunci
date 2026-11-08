@@ -17,6 +17,6 @@ console.log('轮换次数', tries, await p.evaluate(() => document.querySelector
 for (const w of ['打工人', '上班', '加班']) {
   await p.fill('.entry input', w); await p.click('.entry button'); await p.waitForTimeout(450)
 }
-await p.screenshot({ path: '/tmp/ciwen-hot.png' })
+await p.screenshot({ path: '/tmp/xunci-hot.png' })
 console.log('num', await p.evaluate(() => document.querySelector('.num')?.textContent))
 await b.close()

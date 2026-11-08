@@ -42,7 +42,7 @@ for (const s of SIZES) {
   console.log(s.name, JSON.stringify(box))
   if (box.docScroll !== box.docClient) console.log(`  ⚠️ ${s.name} 文档出现滚动`)
   if (box.footBottom > box.vh + 0.5) console.log(`  ⚠️ ${s.name} 底栏超出视口 ${box.footBottom} > ${box.vh}`)
-  await page.screenshot({ path: `/tmp/ciwen-${s.name}-idle.png` })
+  await page.screenshot({ path: `/tmp/xunci-${s.name}-idle.png` })
 
   // 猜几个词
   const words = ['猫', '钢琴', '自由', '医院', '面包']
@@ -54,7 +54,7 @@ for (const s of SIZES) {
   const rows = await page.evaluate(() => document.querySelectorAll('.hlist li').length)
   const pct = await page.evaluate(() => document.querySelector('.num')?.textContent)
   console.log(`  ${s.name} 历史 ${rows} 行, 当前数字 ${pct}`)
-  await page.screenshot({ path: `/tmp/ciwen-${s.name}-play.png` })
+  await page.screenshot({ path: `/tmp/xunci-${s.name}-play.png` })
 
   // 布局压力测试：多猜几个词后是否仍不滚动
   for (const w of ['苹果', '西瓜', '地铁', '股票', '婚礼', '台风', '吉他']) {
@@ -73,7 +73,7 @@ for (const s of SIZES) {
   console.log(`  ${s.name} 多行后`, JSON.stringify(after))
   if (after.docScroll !== after.docClient) console.log(`  ⚠️ ${s.name} 多行后文档滚动`)
   if (after.footBottom > after.vh + 0.5) console.log(`  ⚠️ ${s.name} 多行后底栏越界`)
-  await page.screenshot({ path: `/tmp/ciwen-${s.name}-many.png` })
+  await page.screenshot({ path: `/tmp/xunci-${s.name}-many.png` })
 
   // 结束态：放弃 → 覆盖层（服务端可能关闭「看答案」，此时跳过）
   const danger = page.locator('.foot .danger')
@@ -87,7 +87,7 @@ for (const s of SIZES) {
       return { answer: document.querySelector('.answer')?.textContent, top: Math.round(r.top), bottom: Math.round(r.bottom), vh: window.innerHeight }
     })
     console.log(`  ${s.name} 结算层`, JSON.stringify(overlay))
-    await page.screenshot({ path: `/tmp/ciwen-${s.name}-over.png` })
+    await page.screenshot({ path: `/tmp/xunci-${s.name}-over.png` })
   } else {
     console.log(`  ${s.name} 服务端关闭了「看答案」，跳过结算层检查`)
   }

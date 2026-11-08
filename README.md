@@ -18,12 +18,12 @@ PORT=3110 node server/index.js   # 单端口同时提供静态页和 /api
 
 ```bash
 npm run deploy:claw                          # 默认域名 xunci.grissom.cn
-DOMAIN=ciwen.grissom.cn npm run deploy:claw  # 换域名重跑即可
+DOMAIN=你的域名.grissom.cn npm run deploy:claw  # 换域名重跑即可
 ```
 
-`*.grissom.cn` 已泛解析到 Claw，无需手工加 DNS 记录。脚本会构建前端、rsync 到 `/data/ciwen`、装生产依赖并同步 BGE 模型缓存、用 PM2 起 `ciwen`（`127.0.0.1:3110`）、写 Nginx 反代（含 `/ws`）并用 certbot 签发 HTTPS 证书，最后做 HTTP / WebSocket 自检。重复执行是幂等的：`data/`（对局与管理配置）、依赖和证书不会被重建。
+`*.grissom.cn` 已泛解析到 Claw，无需手工加 DNS 记录。脚本会构建前端、rsync 到 `/data/xunci`、装生产依赖并同步 BGE 模型缓存、用 PM2 起 `xunci`（`127.0.0.1:3110`）、写 Nginx 反代（含 `/ws`）并用 certbot 签发 HTTPS 证书，最后做 HTTP / WebSocket 自检。重复执行是幂等的：`data/`（对局与管理配置）、依赖和证书不会被重建。
 
-看日志：`ssh claw 'pm2 logs ciwen'`。
+看日志：`ssh claw 'pm2 logs xunci'`。
 
 开发模式：
 
@@ -201,14 +201,14 @@ node tools/hotword-check.mjs   # 逐词打印最高热度 + 淘汰名单
 ```bash
 node qa/mobile.mjs      # 390×844 / 360×640 / 414×896 布局
 node qa/sfx-bands.mjs   # 逐段验证 10 个热度档 → 9 种音型
-node qa/sfx-tiers.mjs   # 真实对局验证（需 PORT=3111 CIWEN_DEV_HINT=1 的服务）
+node qa/sfx-tiers.mjs   # 真实对局验证（需 PORT=3111 XUNCI_DEV_HINT=1 的服务）
 ```
 
 需要 `npx playwright install chromium`。
 
 ## 本地调试帮助
 
-`CIWEN_DEV_HINT=1 PORT=3110 node server/index.js` 会让 `/api/game` 返回答案，仅本地用，生产不要设。
+`XUNCI_DEV_HINT=1 PORT=3110 node server/index.js` 会让 `/api/game` 返回答案，仅本地用，生产不要设。
 
 ### 主玩法：问一问
 
@@ -248,4 +248,4 @@ PORT=3110 node server/index.js
 
 相关文件：`server/challenge.js`（会话状态机 / 规则 / 榜单）、`server/scoring.js`（房间与闯关共用的热度打分）、`src/Challenge.tsx` + `src/challenge.css`（选领域、4 关 HUD、结算、榜单）。接口都在 `/api/challenge/*` 下，规则由 `GET /api/challenge/categories` 下发，前端不写死。
 
-验收：`CIWEN_DEV_HINT=1 PORT=3111 node server/index.js`，另开终端跑 `BASE_URL=http://127.0.0.1:3111 node qa/challenge.mjs`（需要 `CIWEN_DEV_HINT=1` 才能自动读出 4 个答案走完整流程）。
+验收：`XUNCI_DEV_HINT=1 PORT=3111 node server/index.js`，另开终端跑 `BASE_URL=http://127.0.0.1:3111 node qa/challenge.mjs`（需要 `XUNCI_DEV_HINT=1` 才能自动读出 4 个答案走完整流程）。

@@ -16,7 +16,7 @@ import { config, loadConfig, updateConfig } from './config.js'
 const PORT = process.env.PORT || 3110
 const HOST = process.env.HOST || '0.0.0.0'
 // 管理页的隐藏入口，知道路径才能访问；前端页面上没有任何入口
-const ADMIN_PATH = process.env.CIWEN_ADMIN_PATH || '/ciwen-manage-8f2k'
+const ADMIN_PATH = process.env.XUNCI_ADMIN_PATH || '/xunci-manage-8f2k'
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
 const app = express()
@@ -44,7 +44,7 @@ const saved = loadState()
 if (saved) {
   for (const g of saved.games) games.set(g.id, g)
   if (saved.room?.gameId && games.has(saved.room.gameId)) room.gameId = saved.room.gameId
-  console.log(`[ciwen] restored ${saved.games.length} game(s) from disk`)
+  console.log(`[xunci] restored ${saved.games.length} game(s) from disk`)
 }
 
 /** 当前需要落盘的完整状态（players 是连接态，不持久化） */
@@ -126,8 +126,8 @@ function publicGame(g) {
     endedAt: g.finishedAt ?? null,
     endReason: g.endReason ?? null,
     winnerId: g.winnerId ?? null,
-    // 仅本地 QA 用：CIWEN_DEV_HINT=1 时提前返回答案，生产环境不设该变量
-    answer: g.finished || process.env.CIWEN_DEV_HINT === '1' ? g.word : undefined,
+    // 仅本地 QA 用：XUNCI_DEV_HINT=1 时提前返回答案，生产环境不设该变量
+    answer: g.finished || process.env.XUNCI_DEV_HINT === '1' ? g.word : undefined,
     hint: p.hint,
   }
 }
@@ -269,7 +269,7 @@ app.post('/api/game', async (req, res) => {
       category: g.category,
       difficulty: g.difficulty,
       attempts: config.attempts,
-      ...(process.env.CIWEN_DEV_HINT === '1' ? { answer: g.word } : {}),
+      ...(process.env.XUNCI_DEV_HINT === '1' ? { answer: g.word } : {}),
     })
   }
   const g = await createRoomGame()
@@ -609,10 +609,10 @@ init()
     // 对企鹅/玫瑰这类常识关联，向量几乎是瞎的，所以启动时就提醒。
     const missing = WORD_POOL.filter((x) => !assocOf(x.w)).map((x) => x.w)
     if (missing.length) {
-      console.warn(`[ciwen] ${missing.length} 个目标词没有关联词典：${missing.slice(0, 12).join(' ')}${missing.length > 12 ? ' …' : ''}`)
+      console.warn(`[xunci] ${missing.length} 个目标词没有关联词典：${missing.slice(0, 12).join(' ')}${missing.length > 12 ? ' …' : ''}`)
     }
     server.listen(PORT, HOST, () => {
-      console.log(`[ciwen] listening on ${HOST}:${PORT}, model ready, assoc ${assocStats().targets} 词 / ${assocStats().pairs} 条`)
+      console.log(`[xunci] listening on ${HOST}:${PORT}, model ready, assoc ${assocStats().targets} 词 / ${assocStats().pairs} 条`)
       // 建局在玩家连入后按需触发；这里只广播一次 ready 状态
       broadcastState()
     })

@@ -2,19 +2,19 @@
 # 把「寻词蹭热度」部署到 Claw（SSH 别名 claw，见 ~/.ssh/config）
 #
 #   npm run deploy:claw                            # 默认域名 xunci.grissom.cn
-#   DOMAIN=ciwen.grissom.cn npm run deploy:claw    # 换域名重跑即可
+#   DOMAIN=你的域名.grissom.cn npm run deploy:claw    # 换域名重跑即可
 #
-# 流程：本地构建 → rsync 到 /data/ciwen → npm ci + 同步 BGE 模型缓存
+# 流程：本地构建 → rsync 到 /data/xunci → npm ci + 同步 BGE 模型缓存
 #       → PM2 起服务 → Nginx 反代（含 /ws）→ Let's Encrypt 证书 → 自检
 # 幂等：重复执行不会重建 data/（对局与配置）、不会重装依赖、不会重签证书。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SSH_HOST="${SSH_HOST:-claw}"
-REMOTE_DIR="${REMOTE_DIR:-/data/ciwen}"
+REMOTE_DIR="${REMOTE_DIR:-/data/xunci}"
 DOMAIN="${DOMAIN:-xunci.grissom.cn}"
 PORT=3110                        # 与 ecosystem.config.cjs 保持一致
-APP=ciwen
+APP=xunci
 WEBROOT=/data/letsencrypt-webroot
 CONF="/etc/nginx/conf.d/${DOMAIN}.conf"
 CERT="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"

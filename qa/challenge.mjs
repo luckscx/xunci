@@ -1,6 +1,6 @@
 // 闯关模式 UI 验收：模式切换 → 选领域 → 连闯 4 题 → 结算上榜 → 榜单可见。
-// 需要服务端带 CIWEN_DEV_HINT=1 启动，脚本通过接口读答案走完整流程。
-// BASE_URL=http://127.0.0.1:3111 CIWEN_DEV_HINT=1 node qa/challenge.mjs
+// 需要服务端带 XUNCI_DEV_HINT=1 启动，脚本通过接口读答案走完整流程。
+// BASE_URL=http://127.0.0.1:3111 XUNCI_DEV_HINT=1 node qa/challenge.mjs
 import { chromium } from 'playwright'
 
 const BASE = process.env.BASE_URL || 'http://127.0.0.1:3110'
@@ -59,7 +59,7 @@ await p.locator('.panel-links .ghost').first().click()
 await p.waitForSelector('.board-list')
 await p.waitForSelector('.board-list .rk')
 ok((await p.locator('.board-list li.me').count()) === 1, '领域榜高亮自己')
-await p.screenshot({ path: '/tmp/ciwen-challenge-board.png' })
+await p.screenshot({ path: '/tmp/xunci-challenge-board.png' })
 
 for (const [w, h] of [[390, 844], [360, 640], [414, 896]]) {
   await p.setViewportSize({ width: w, height: h })

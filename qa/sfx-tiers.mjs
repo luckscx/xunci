@@ -1,5 +1,5 @@
 // 用带答案的本地服务验证"不同热度段 → 不同音型"
-// 需要：PORT=3111 CIWEN_DEV_HINT=1 node server/index.js
+// 需要：PORT=3111 XUNCI_DEV_HINT=1 node server/index.js
 import { chromium } from 'playwright'
 import { WORD_POOL } from '../server/words.js'
 
@@ -70,6 +70,6 @@ for (const w of plan) {
 
 const sigs = new Set(rows.filter((r) => r.motif.length).map((r) => r.motif.map((o) => o.f).join(',')))
 console.log(`不同音型 ${sigs.size} 种 / ${rows.filter((r) => r.motif.length).length} 次有效结果`)
-await p.screenshot({ path: '/tmp/ciwen-sfx-win.png' })
+await p.screenshot({ path: '/tmp/xunci-sfx-win.png' })
 console.log(errs.length ? 'ERR ' + errs.join(' | ') : 'no console errors')
 await b.close()

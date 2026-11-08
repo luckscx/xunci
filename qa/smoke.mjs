@@ -29,7 +29,7 @@ const state = await p.evaluate(() => {
 })
 console.log(JSON.stringify(state, null, 1))
 
-await p.screenshot({ path: '/tmp/ciwen-pull-idle.png' })
+await p.screenshot({ path: '/tmp/xunci-pull-idle.png' })
 
 // 猜 3 个词，看热度反馈是否正常
 for (const w of ['汽车', '钢琴', '苹果']) {
@@ -46,7 +46,7 @@ const after = await p.evaluate(() => ({
   rows: document.querySelectorAll('.hlist li').length,
 }))
 console.log('猜 3 次后:', JSON.stringify(after))
-await p.screenshot({ path: '/tmp/ciwen-pull-play.png' })
+await p.screenshot({ path: '/tmp/xunci-pull-play.png' })
 
 console.log(errs.length ? 'ERR ' + errs.join(' | ') : 'no console errors')
 await b.close()

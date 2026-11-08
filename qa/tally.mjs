@@ -30,6 +30,6 @@ await p.waitForTimeout(700)
 const reset = await read()
 console.log('换一局后剩余:', reset, reset === first ? '✓' : '✗ 没有归零')
 
-await p.screenshot({ path: '/tmp/ciwen-tally.png' })
+await p.screenshot({ path: '/tmp/xunci-tally.png' })
 console.log(errs.length ? 'ERR ' + errs.join(' | ') : 'no console errors')
 await b.close()

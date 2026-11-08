@@ -26,7 +26,7 @@ for (const w of ['情人节', '花', '刺', '月季']) {
   await p.click('.entry button')
   await p.waitForTimeout(700)
 }
-await p.screenshot({ path: '/tmp/ciwen-assoc-play.png' })
+await p.screenshot({ path: '/tmp/xunci-assoc-play.png' })
 const rows = await p.evaluate(() => [...document.querySelectorAll('.hlist li')].map((li) => li.textContent.replace(/\s+/g, ' ').trim()))
 console.log('榜单:', JSON.stringify(rows))
 console.log(errs.length ? 'ERR ' + errs.join(' | ') : 'no console errors')

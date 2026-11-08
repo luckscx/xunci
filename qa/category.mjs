@@ -32,7 +32,7 @@ const chip = () =>
   })
 
 console.log('开局:', JSON.stringify(await chip()))
-await p.screenshot({ path: '/tmp/ciwen-cat-locked.png' })
+await p.screenshot({ path: '/tmp/xunci-cat-locked.png' })
 
 for (let i = 0; i < 9; i++) {
   await p.fill('.entry input', words[i])
@@ -46,7 +46,7 @@ await p.fill('.entry input', words[9])
 await p.click('.entry button')
 await p.waitForTimeout(300)
 console.log('第 10 次:', JSON.stringify(await chip()))
-await p.screenshot({ path: '/tmp/ciwen-cat-unlocked.png' })
+await p.screenshot({ path: '/tmp/xunci-cat-unlocked.png' })
 
 await p.fill('.entry input', words[10])
 await p.click('.entry button')
