@@ -5,7 +5,8 @@ import { dirname, join } from 'node:path'
 import http from 'node:http'
 import { WebSocketServer } from 'ws'
 import { init, isReady, embedWord, baseline, overlap, score } from './embedder.js'
-import { pickTarget } from './words.js'
+import { pickTarget, WORD_POOL } from './words.js'
+import { assocOf, assocStats } from './assoc.js'
 import { askJudge, judgeConfigured } from './judge.js'
 import { loadState, touch, startPersist } from './store.js'
 import { config, loadConfig, updateConfig } from './config.js'
@@ -202,12 +203,18 @@ async function doGuess(g, word, by, byId) {
   const dup = g.guesses.find((x) => x.word === word)
   if (dup) return { dup: true, pct: dup.pct }
 
-  const tv = await embedWord(g.word)
-  const gv = await embedWord(word)
-  const raw = cos(tv, gv)
   const exact = word === g.word
-  // 非精确命中最多 99 热度：像「从容」对「从从容容」这种极近词，避免显示 100 却不判胜
-  const pct = exact ? 100 : Math.min(99, score(raw, g.base, overlap(g.word, word)))
+  // 关联词典优先：作者分层的邻居直接给热度，补上模型对常识关联的盲区
+  // （企鹅→南极 4、玫瑰→月季 7 这种情况）。表里没有的词才回落到向量算。
+  const authored = exact ? null : assocOf(g.word)?.get(word)
+  let pct
+  if (exact) pct = 100
+  else if (authored != null) pct = Math.min(99, authored)
+  else {
+    const tv = await embedWord(g.word)
+    const gv = await embedWord(word)
+    pct = Math.min(99, score(cos(tv, gv), g.base, overlap(g.word, word)))
+  }
   g.guesses.push({ word, pct, by, byId, at: Date.now() })
   if (exact) {
     g.finished = true
@@ -247,7 +254,7 @@ function checkAsk(raw) {
 
 // ---------- REST ----------
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, ready: isReady(), games: games.size, players: players.size })
+  res.json({ ok: true, ready: isReady(), games: games.size, players: players.size, assoc: assocStats().targets })
 })
 
 app.get('/api/state', (req, res) => {
@@ -601,8 +608,14 @@ loadConfig()
 
 init()
   .then(() => {
+    // 新增目标词时容易忘配关联词典：这些局的反馈只能靠向量兜底，
+    // 对企鹅/玫瑰这类常识关联，向量几乎是瞎的，所以启动时就提醒。
+    const missing = WORD_POOL.filter((x) => !assocOf(x.w)).map((x) => x.w)
+    if (missing.length) {
+      console.warn(`[ciwen] ${missing.length} 个目标词没有关联词典：${missing.slice(0, 12).join(' ')}${missing.length > 12 ? ' …' : ''}`)
+    }
     server.listen(PORT, HOST, () => {
-      console.log(`[ciwen] listening on ${HOST}:${PORT}, model ready`)
+      console.log(`[ciwen] listening on ${HOST}:${PORT}, model ready, assoc ${assocStats().targets} 词 / ${assocStats().pairs} 条`)
       // 建局在玩家连入后按需触发；这里只广播一次 ready 状态
       broadcastState()
     })
