@@ -39,11 +39,12 @@ export type Notice = { type: 'notice'; kind: 'error' | 'dup'; message: string }
 
 export type NewGame = { id: string; category: string; difficulty: number; attempts: number; answer?: string }
 
-async function post<T>(path: string, body?: unknown): Promise<T> {
+async function post<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const res = await fetch(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body ?? {}),
+    signal,
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
@@ -155,8 +156,8 @@ export const challengeStart = (domain: string, me: Identity) =>
   post<ChallengeState>('/api/challenge/start', { domain, playerId: me.id, name: me.name })
 export const challengeSession = (id: string) =>
   get<ChallengeState>(`/api/challenge/session?id=${encodeURIComponent(id)}`)
-export const challengeGuess = (id: string, word: string) =>
-  post<ChallengeGuessResult>('/api/challenge/guess', { id, word })
-export const challengeAsk = (id: string, q: string) =>
-  post<ChallengeAskResult>('/api/challenge/ask', { id, q })
+export const challengeGuess = (id: string, word: string, signal?: AbortSignal) =>
+  post<ChallengeGuessResult>('/api/challenge/guess', { id, word }, signal)
+export const challengeAsk = (id: string, q: string, signal?: AbortSignal) =>
+  post<ChallengeAskResult>('/api/challenge/ask', { id, q }, signal)
 export const challengeAbandon = (id: string) => post<ChallengeState>('/api/challenge/abandon', { id })

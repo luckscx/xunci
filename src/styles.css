@@ -505,6 +505,57 @@ body {
   backdrop-filter: blur(10px);
   animation: fadeIn 220ms ease both;
 }
+
+/* 思考中遮罩：只在慢请求（>300ms）时出现，铺满全屏把所有点击吃掉 */
+.thinking {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 8, 14, 0.5);
+  backdrop-filter: blur(3px);
+  animation: fadeIn 160ms ease both;
+  /* 关键：挡住底下所有操作 */
+  pointer-events: all;
+  touch-action: none;
+}
+
+.thinking-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(18, 22, 32, 0.92);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+  color: #dfe6f2;
+  letter-spacing: 0.02em;
+}
+
+.thinking-ring {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.16);
+  border-top-color: #7fd3ff;
+  animation: thinkingSpin 0.7s linear infinite;
+}
+
+@keyframes thinkingSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-ring {
+    animation-duration: 1.6s;
+  }
+}
 @keyframes fadeIn {
   from {
     opacity: 0;

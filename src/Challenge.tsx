@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from './api'
 import { confOf, tempOf } from './game'
 import { playDup, playLose, playTap, playTier } from './sfx'
+import { SLOW_MS, TIMEOUT_ASK, TIMEOUT_GUESS, usePending } from './pending'
+import Thinking from './Thinking'
 import './challenge.css'
 
 const SESSION_KEY = 'xunci.challenge.v1'
@@ -33,6 +35,19 @@ export default function Challenge({ me }: { me: api.Identity }) {
   const clockRef = useRef({ now: 0, at: 0 })
   const timeoutSyncRef = useRef(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const abortRef = useRef<AbortController | null>(null)
+
+  // 300ms 没回音出菊花并锁操作；到点 abort 请求 + 解锁（猜词 3 秒 / 问一问 8 秒）
+  const think = usePending({
+    slowMs: SLOW_MS,
+    timeoutMs: TIMEOUT_GUESS,
+    onTimeout: (ms) => {
+      abortRef.current?.abort()
+      abortRef.current = null
+      setBusy(false)
+      setErr(`等了 ${Math.round(ms / 1000)} 秒没等到回音，再试一次`)
+    },
+  })
 
   const apply = useCallback((s: api.ChallengeState) => {
     setSession(s)
@@ -150,11 +165,13 @@ export default function Challenge({ me }: { me: api.Identity }) {
     setFlash('')
     playTap()
     setInput('')
-    // 判官要等模型回话，网络挂起时兜底解锁
-    const guard = mode === 'ask' ? window.setTimeout(() => setBusy(false), 25000) : 0
+    // 300ms 没回音出菊花；猜词 3 秒、问一问 8 秒到点就 abort 掉请求并解锁
+    const ac = new AbortController()
+    abortRef.current = ac
+    think.start({ timeoutMs: mode === 'ask' ? TIMEOUT_ASK : TIMEOUT_GUESS })
     try {
       if (mode === 'ask') {
-        const r = await api.challengeAsk(session.id, text)
+        const r = await api.challengeAsk(session.id, text, ac.signal)
         apply(r)
         const a = r.answer
         if (a?.dup) {
@@ -164,7 +181,7 @@ export default function Challenge({ me }: { me: api.Identity }) {
           playTier(a.yes)
         }
       } else {
-        const r = await api.challengeGuess(session.id, text)
+        const r = await api.challengeGuess(session.id, text, ac.signal)
         apply(r)
         const g = r.guess
         if (g?.dup) {
@@ -182,9 +199,11 @@ export default function Challenge({ me }: { me: api.Identity }) {
         }
       }
     } catch (e) {
-      setErr((e as Error).message || '网络开小差了')
+      // abort 是我们自己超时取消的，别再报一次「网络开小差了」
+      if ((e as Error).name !== 'AbortError') setErr((e as Error).message || '网络开小差了')
     } finally {
-      window.clearTimeout(guard)
+      abortRef.current = null
+      think.stop()
       setBusy(false)
     }
   }
@@ -253,7 +272,7 @@ export default function Challenge({ me }: { me: api.Identity }) {
           </div>
           <div className="rules">
             <span><b>{rules?.levels ?? 4}</b> 道题</span>
-            <span><b>{Math.round((rules?.timeLimitMs ?? 360000) / 60000)}</b> 分钟总时限</span>
+            <span><b>{Math.round((rules?.timeLimitMs ?? 900000) / 60000)}</b> 分钟总时限</span>
             <span><b>{rules?.questionLimit ?? 10} 问 + {rules?.guessLimit ?? 30} 次</b> 额度</span>
           </div>
           <div className="rule-note">综合分 = 问与猜的总步数 × {rules?.perGuessSeconds ?? 30} + 用时秒数，越低越好</div>
@@ -445,6 +464,9 @@ export default function Challenge({ me }: { me: api.Identity }) {
             <button className="ghost" onClick={() => void abandon()} disabled={session.finished || busy}>放弃本次</button>
             <button className="ghost" onClick={() => openBoard(session.category)}>排行榜</button>
           </footer>
+
+          {/* 慢请求才出菊花：300ms 内回来的请求不该闪一下 */}
+          <Thinking show={busy && think.slow} label={mode === 'ask' ? '判官在想' : '在算热度'} />
 
           {session.finished && (
             <div className="overlay">

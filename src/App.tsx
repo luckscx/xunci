@@ -5,6 +5,8 @@ import Challenge from './Challenge'
 import { loadMe } from './me'
 import { tempOf, confOf } from './game'
 import { isMuted, playDup, playLose, playTap, playTier, setMuted } from './sfx'
+import { SLOW_MS, TIMEOUT_ASK, TIMEOUT_GUESS, usePending } from './pending'
+import Thinking from './Thinking'
 
 function useAnimatedNumber(target: number, ms = 520) {
   const [val, setVal] = useState(target)
@@ -45,6 +47,16 @@ export default function App() {
   const countRef = useRef(0)
   const startingRef = useRef(false)
 
+  // 300ms 没回音出菊花并锁住操作；猜词 3 秒、问一问 8 秒到点自动解锁，别让玩家对着转圈干等
+  const think = usePending({
+    slowMs: SLOW_MS,
+    timeoutMs: TIMEOUT_GUESS,
+    onTimeout: (ms) => {
+      setBusy(false)
+      setErr(`等了 ${Math.round(ms / 1000)} 秒没等到回音，再试一次`)
+    },
+  })
+
   const game = snap?.game ?? null
   // 老服务不下发该字段时按可用处理
   const judgeReady = snap?.judgeReady !== false
@@ -65,6 +77,7 @@ export default function App() {
       const announce = prev?.id === g?.id && n > countRef.current
       countRef.current = n
       setBusy(false)
+      think.stop()
       if (announce && g) {
         const grewQ = (g.questions?.length ?? 0) > (prev?.questions?.length ?? 0)
         if (grewQ) {
@@ -79,7 +92,7 @@ export default function App() {
     }
     gameRef.current = g
     setSnap(s)
-  }, [])
+  }, [think.stop])
 
   useEffect(() => {
     const conn = net.connect(() => me, {
@@ -88,6 +101,7 @@ export default function App() {
         if (ntc.kind === 'dup') playDup()
         setErr(ntc.message)
         setBusy(false)
+        think.stop()
       },
       onClose: () => setErr('连接断开，正在重连…'),
     })
@@ -96,7 +110,7 @@ export default function App() {
       connRef.current = null
       conn.close()
     }
-  }, [handleState, me])
+  }, [handleState, me, think.stop])
 
   const start = useCallback(async () => {
     setErr('')
@@ -203,17 +217,18 @@ export default function App() {
     e.preventDefault()
     const text = input.trim()
     if (!game || !text || busy || game.finished) return
+    const conn = connRef.current
+    if (!conn) {
+      setErr('连接断了，正在重连…')
+      return
+    }
     setBusy(true)
     setErr('')
+    // 300ms 没回音才出菊花；猜词 3 秒、问一问 8 秒，到点自动解锁（见 pending.ts）
+    think.start({ timeoutMs: mode === 'ask' ? TIMEOUT_ASK : TIMEOUT_GUESS })
     playTap()
-    if (mode === 'ask') {
-      connRef.current?.send({ type: 'ask', q: text })
-      // 判官要等模型回话，兜底解锁放宽到 20s
-      window.setTimeout(() => setBusy(false), 20000)
-    } else {
-      connRef.current?.send({ type: 'guess', word: text })
-      window.setTimeout(() => setBusy(false), 4000)
-    }
+    if (mode === 'ask') conn.send({ type: 'ask', q: text })
+    else conn.send({ type: 'guess', word: text })
     setInput('')
   }
 
@@ -432,6 +447,9 @@ export default function App() {
           <p>首次启动需要加载词向量模型，稍等片刻</p>
         </div>
       )}
+
+      {/* 慢请求才出菊花：300ms 内回来的请求不该闪一下 */}
+      <Thinking show={view === 'room' && busy && think.slow} label={mode === 'ask' ? '判官在想' : '在算热度'} />
 
       {view === 'room' && over && (
         <div className="overlay">

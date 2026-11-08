@@ -18,7 +18,7 @@ const MAX_PLAYERS = 100
 /** 规则集中放这里，前端从 /categories 读，不写死 */
 export const RULES = {
   levels: 4,
-  timeLimitMs: 6 * 60_000,
+  timeLimitMs: 15 * 60_000,
   /** 主玩法问一问的整轮额度（4 题共享），判官未配置时为 0 */
   questionLimit: 10,
   /** 猜词额度（4 题共享），问不消耗猜词次数 */
