@@ -28,7 +28,8 @@ WOA 预览：`https://${GF_IDE_WORKSPACE_ID}-3110.gz.cloudide.woa.com`
 ```
 server/embedder.js   模型加载、向量缓存、热度归一化打分
 server/words.js      目标词池（20 分类 / 三档难度）
-server/index.js      Express：/api/game /api/guess /api/reveal + 静态站
+server/judge.js      是非题判官：用 @typesafe-ai/sdk 的 noul 回答"是"的概率
+server/index.js      Express：/api/game /api/guess /api/ask /api/reveal + 静态站
 src/App.tsx          单屏 UI：热度表、猜词榜单、结算弹层
 src/game.ts          热度档位文案 + 本地战绩
 qa/mobile.mjs        Playwright 多机型布局验证（无滚动/不越界/无报错）
@@ -143,3 +144,14 @@ node qa/sfx-tiers.mjs   # 真实对局验证（需 PORT=3111 CIWEN_DEV_HINT=1 �
 ## 本地调试帮助
 
 `CIWEN_DEV_HINT=1 PORT=3110 node server/index.js` 会让 `/api/game` 返回答案，仅本地用，生产不要设。
+
+### 是非题模式（问一句）
+
+输入区上方切到「问一句」，玩家可以提是非题（如"这是一个面积很大的地方吗？"），判官模型站在答案立场回答"是"的概率（比如 70% 是 / 30% 否），每局限 10 问，问答对全房间同步。判官走 OpenAI 兼容接口，需要配置环境变量：
+
+```bash
+TYPESAFE_API_KEY=ts-xxx \
+PORT=3110 node server/index.js
+```
+
+不配置时是非题会提示未配置，猜词玩法不受影响。

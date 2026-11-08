@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from './api'
+import * as net from './net'
+import { loadMe, saveMe } from './me'
 import { loadStats, saveStats, tempOf, type Stats } from './game'
 import { isMuted, playDup, playLose, playTap, playTier, setMuted } from './sfx'
-
-type Guess = { word: string; pct: number }
 
 // 卡在中间时的引导语：告诉玩家"再往里走"该往哪个方向想
 const COACH = [
@@ -48,43 +48,94 @@ function useAnimatedNumber(target: number, ms = 520) {
 }
 
 export default function App() {
-  const [game, setGame] = useState<api.NewGame | null>(null)
-  const [guesses, setGuesses] = useState<Guess[]>([])
-  const [last, setLast] = useState<api.GuessResult | null>(null)
+  const [me, setMe] = useState(() => loadMe())
+  const meRef = useRef(me)
+  meRef.current = me
+  const [snap, setSnap] = useState<api.RoomState | null>(null)
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
-  const [boot, setBoot] = useState('正在唤醒语言模型…')
-  const [over, setOver] = useState<{ won: boolean; answer: string } | null>(null)
-  const [category, setCategory] = useState<string | null>(null)
+  const [boot, setBoot] = useState('正在连接服务器…')
   const [stats, setStats] = useState<Stats>(() => loadStats())
   const [copied, setCopied] = useState(false)
   const [muted, setMutedState] = useState(() => isMuted())
-  const [startedAt, setStartedAt] = useState<number | null>(null)
-  const [endedAt, setEndedAt] = useState<number | null>(null)
   const [tick, setTick] = useState(Date.now())
+  const [nameDraft, setNameDraft] = useState('')
+  const [editingName, setEditingName] = useState(false)
+  const [mode, setMode] = useState<'guess' | 'ask'>('guess')
+  const connRef = useRef<net.Conn | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const gameRef = useRef<api.RoomGame | null>(null)
+  const countRef = useRef(0)
+  const offsetRef = useRef(0)
+  const countedRef = useRef<Set<string>>(new Set())
+  const startingRef = useRef(false)
+
+  const game = snap?.game ?? null
+  const players = snap?.players ?? []
+  const guesses = useMemo(() => game?.guesses ?? [], [game])
+  const questions = useMemo(() => game?.questions ?? [], [game])
+  const last = guesses.length ? guesses[guesses.length - 1] : null
+  const prevGuess = guesses.length > 1 ? guesses[guesses.length - 2] : null
+
+  // 服务端状态到达：更新时钟偏移，新猜词/新问题到达时解除输入锁定并配音效
+  const handleState = useCallback((s: api.RoomState) => {
+    offsetRef.current = s.now - Date.now()
+    setErr('')
+    const g = s.game
+    const n = (g?.guesses.length ?? 0) + (g?.questions?.length ?? 0)
+    if (n !== countRef.current) {
+      // 同一局里活动数增加才算"新的"（首次进局/换局的存量记录不响）
+      const prev = gameRef.current
+      const announce = prev?.id === g?.id && n > countRef.current
+      countRef.current = n
+      setBusy(false)
+      if (announce && g) {
+        const grewQ = (g.questions?.length ?? 0) > (prev?.questions?.length ?? 0)
+        if (grewQ) {
+          // 判官的答案按"是"的概率走热度音：越肯定越烫
+          const q = g.questions[g.questions.length - 1]
+          window.setTimeout(() => playTier(q.yes), 380)
+        } else if (g.finished) {
+          if (g.endReason === 'guessed') window.setTimeout(() => playTier(100), 380)
+          else window.setTimeout(() => playLose(), 700)
+        } else {
+          const entry = g.guesses[g.guesses.length - 1]
+          window.setTimeout(() => playTier(entry.pct), 380)
+        }
+      }
+    }
+    gameRef.current = g
+    setSnap(s)
+  }, [])
+
+  useEffect(() => {
+    const conn = net.connect(
+      () => ({ id: meRef.current.id, name: meRef.current.name }),
+      {
+        onState: handleState,
+        onNotice: (ntc) => {
+          if (ntc.kind === 'dup') playDup()
+          setErr(ntc.message)
+          setBusy(false)
+        },
+        onClose: () => setErr('连接断开，正在重连…'),
+      },
+    )
+    connRef.current = conn
+    return () => {
+      connRef.current = null
+      conn.close()
+    }
+  }, [handleState])
 
   const start = useCallback(async () => {
-    setOver(null)
-    setGuesses([])
-    setLast(null)
-    setInput('')
     setErr('')
-    setGame(null)
-    setCategory(null)
-    setEndedAt(null)
-    setStartedAt(null)
     let delay = 800
     for (let i = 0; i < 40; i++) {
       try {
-        const g = await api.newGame()
-        const now = Date.now()
-        setGame(g)
-        setStartedAt(now)
-        setTick(now)
+        await api.newGame()
         setBoot('')
-        setTimeout(() => inputRef.current?.focus(), 150)
         return
       } catch (e) {
         const status = (e as { status?: number }).status
@@ -96,43 +147,84 @@ export default function App() {
     setErr('引擎迟迟没有响应，刷新页面试试')
   }, [])
 
+  // 房间还没有局（首次进入/服务端重启）→ 自动开局
   useEffect(() => {
-    void start()
-  }, [start])
+    if (!snap || !snap.ready || snap.game || startingRef.current) return
+    startingRef.current = true
+    void start().finally(() => {
+      startingRef.current = false
+    })
+  }, [snap, start])
 
-  // 计时：局内每秒走一次，结算后停住
+  // 引导文案跟随连接/模型状态
   useEffect(() => {
-    if (!startedAt || endedAt) return
-    const t = window.setInterval(() => setTick(Date.now()), 1000)
+    if (!snap) setBoot('正在连接服务器…')
+    else if (!snap.ready) setBoot('正在唤醒语言模型…')
+    else setBoot('')
+  }, [snap])
+
+  // 模型加载期间没有广播，轮询兜底
+  useEffect(() => {
+    if (!snap || snap.ready) return
+    const t = window.setInterval(() => {
+      void api
+        .roomState()
+        .then((s) => setSnap(s))
+        .catch(() => {})
+    }, 2000)
     return () => window.clearInterval(t)
-  }, [startedAt, endedAt])
+  }, [snap])
+
+  // 计时：局内每秒走一次，结算后停住（用服务端时钟偏移换算）
+  const gameId = game?.id
+  const done = game?.finished ?? true
+  useEffect(() => {
+    if (!gameId || done) return
+    const t = window.setInterval(() => setTick(Date.now() + offsetRef.current), 1000)
+    return () => window.clearInterval(t)
+  }, [gameId, done])
+
+  // 新局开始时聚焦输入框
+  useEffect(() => {
+    if (!gameId || done) return
+    const t = window.setTimeout(() => inputRef.current?.focus(), 150)
+    return () => window.clearTimeout(t)
+  }, [gameId, done])
+
+  // 一局结束时计入本地统计：猜中归功于猜中的人
+  const best = useMemo(() => (guesses.length ? guesses.reduce((a, b) => (b.pct > a.pct ? b : a)) : null), [guesses])
+  useEffect(() => {
+    if (!game?.finished || countedRef.current.has(game.id)) return
+    countedRef.current.add(game.id)
+    const won = game.winnerId === me.id
+    const topPct = best?.pct ?? 0
+    setStats((prev) => {
+      const next: Stats = {
+        plays: prev.plays + 1,
+        wins: prev.wins + (won ? 1 : 0),
+        bestPct: Math.max(prev.bestPct, won ? 100 : topPct),
+        fewest: won ? (prev.fewest ? Math.min(prev.fewest, game.guesses.length) : game.guesses.length) : prev.fewest,
+      }
+      saveStats(next)
+      return next
+    })
+  }, [game, me.id, best])
 
   const pct = last?.pct ?? 0
   const shown = useAnimatedNumber(pct)
   const temp = tempOf(pct)
   const hasGuess = last !== null
-  const best = useMemo(() => (guesses.length ? guesses.reduce((a, b) => (b.pct > a.pct ? b : a)) : null), [guesses])
   const sorted = useMemo(() => [...guesses].sort((a, b) => b.pct - a.pct), [guesses])
 
-  const delta = last && last.prev !== null && !last.dup ? pct - last.prev : null
+  const delta = last && prevGuess ? pct - prevGuess.pct : null
+  const winner = game?.winnerId ? players.find((p) => p.id === game.winnerId)?.name ?? null : null
+  const over = game?.finished
+    ? { won: game.winnerId === me.id, answer: game.answer ?? '??', reason: game.endReason, winner }
+    : null
 
-  const finish = useCallback(
-    (won: boolean, answer: string, used: number) => {
-      setOver({ won, answer })
-      setEndedAt(Date.now())
-      setStats((prev) => {
-        const next: Stats = {
-          plays: prev.plays + 1,
-          wins: prev.wins + (won ? 1 : 0),
-          bestPct: Math.max(prev.bestPct, won ? 100 : (best?.pct ?? 0)),
-          fewest: won ? (prev.fewest ? Math.min(prev.fewest, used) : used) : prev.fewest,
-        }
-        saveStats(next)
-        return next
-      })
-    },
-    [best],
-  )
+  // 分类提示进度：猜满 categoryAt 次才解锁
+  const catAt = game?.categoryAt ?? 10
+  const catLeft = Math.max(0, catAt - guesses.length)
 
   function toggleMute() {
     const next = !muted
@@ -140,55 +232,50 @@ export default function App() {
     setMutedState(next)
   }
 
-  async function submit(e: React.FormEvent) {
+  function submit(e: React.FormEvent) {
     e.preventDefault()
-    const word = input.trim()
-    if (!game || !word || busy || over) return
+    const text = input.trim()
+    if (!game || !text || busy || game.finished) return
     setBusy(true)
     setErr('')
     playTap()
-    try {
-      const r = await api.guess(game.id, word)
-      if (r.dup) {
-        playDup()
-        if (r.category) setCategory(r.category)
-        setErr(`「${word}」猜过了，换一个`)
-        setInput('')
-        return
-      }
-      setLast(r)
-      if (r.category) setCategory(r.category)
-      setGuesses((prev) => [...prev, { word, pct: r.pct }])
-      setInput('')
-      // 数字滚动到落定再响，声音落在"揭晓"这一刻
-      window.setTimeout(() => playTier(r.pct), 380)
-      if (r.exact) finish(true, r.answer || word, guesses.length + 1)
-      else if (r.attemptsLeft <= 0) {
-        window.setTimeout(() => playLose(), 700)
-        finish(false, r.answer || '??', guesses.length + 1)
-      }
-    } catch (e) {
-      setErr((e as Error).message)
-    } finally {
-      setBusy(false)
-      inputRef.current?.focus()
+    if (mode === 'ask') {
+      connRef.current?.send({ type: 'ask', q: text })
+      // 判官要等模型回话，兜底解锁放宽到 20s
+      window.setTimeout(() => setBusy(false), 20000)
+    } else {
+      connRef.current?.send({ type: 'guess', word: text })
+      // 网络兜底：状态广播或提示没来也要解锁输入
+      window.setTimeout(() => setBusy(false), 4000)
     }
+    setInput('')
   }
 
-  async function giveUp() {
-    if (!game) return
-    try {
-      const r = await api.reveal(game.id)
-      finish(false, r.answer, guesses.length)
-    } catch (e) {
-      setErr((e as Error).message)
-    }
+  function giveUp() {
+    if (!game || game.finished) return
+    connRef.current?.send({ type: 'reveal' })
+  }
+
+  function beginRename() {
+    setNameDraft(me.name)
+    setEditingName(true)
+  }
+
+  function commitRename() {
+    setEditingName(false)
+    const name = nameDraft.trim().slice(0, 12)
+    if (!name || name === me.name) return
+    const next = { ...me, name }
+    setMe(next)
+    saveMe(next)
+    connRef.current?.send({ type: 'rename', name })
   }
 
   async function copyResult() {
     if (!over) return
     const rows = sorted.slice(0, 6).map((g) => `${g.word} ${g.pct}`).join(' · ')
-    const text = `寻词蹭热度 · ${category ?? ''}\n${over.won ? '蹭到了' : '没蹭上'}：${over.answer}\n${rows}`
+    const who = over.winner ? `（${over.winner} 猜中）` : ''
+    const text = `寻词蹭热度 · ${game?.category ?? ''}\n${over.won ? '蹭到了' : '没蹭上'}：${over.answer}${who}\n${rows}`
     try {
       await navigator.clipboard.writeText(text)
       setCopied(true)
@@ -199,8 +286,8 @@ export default function App() {
   }
 
   const heat = Math.min(1, Math.max(0, pct / 100))
-  const catAt = game?.categoryAt ?? 10
-  const catLeft = Math.max(0, catAt - guesses.length)
+  const startedAt = game?.startedAt ?? null
+  const endedAt = game?.finished ? game.endedAt : null
 
   return (
     <div
@@ -234,14 +321,58 @@ export default function App() {
       </header>
 
       <div className="chips">
-        {category ? (
-          <span className="chip cat unlocked">提示 · {category}</span>
+        {game?.category ? (
+          <span className="chip cat unlocked">提示 · {game.category}</span>
         ) : (
           <span className="chip cat locked">
             {game ? `分类 · 再猜 ${catLeft} 次解锁` : '分类 · …'}
           </span>
         )}
-        {last?.hint && <span className="chip">共 {last.hint.chars} 个字</span>}
+        {game?.hint && <span className="chip">{game.hint.chars} 个字</span>}
+        <span className="tally">
+          <span>
+            开始 <b>{startedAt ? fmtClock(startedAt) : '--:--'}</b>
+          </span>
+          <i />
+          <span>
+            用时 <b>{startedAt ? fmtDur((endedAt ?? tick) - startedAt) : '00:00'}</b>
+          </span>
+          <i />
+          <span>
+            已猜 <b>{guesses.length}</b>
+            <em>/{game?.attempts ?? 30}</em>
+          </span>
+        </span>
+      </div>
+
+      <div className="players">
+        <span className="pc">{snap ? `在线 ${players.length} 人` : '连接中…'}</span>
+        {players.map((p) =>
+          p.id === me.id && editingName ? (
+            <input
+              key={p.id}
+              className="name-edit"
+              value={nameDraft}
+              autoFocus
+              maxLength={12}
+              onChange={(e) => setNameDraft(e.target.value)}
+              onBlur={commitRename}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitRename()
+                if (e.key === 'Escape') setEditingName(false)
+              }}
+            />
+          ) : (
+            <button
+              key={p.id}
+              className={p.id === me.id ? 'p me' : 'p'}
+              onClick={() => p.id === me.id && beginRename()}
+              title={p.id === me.id ? '点击改名' : p.name}
+            >
+              {p.name}
+            </button>
+          ),
+        )}
       </div>
 
       <section className={`gauge ${hasGuess ? 'live' : ''}`}>
@@ -271,7 +402,7 @@ export default function App() {
         <div className="meta">
           {hasGuess ? (
             <>
-              <span className="lastword">「{guesses[guesses.length - 1]?.word}」</span>
+              <span className="lastword">「{last?.word}」</span>
               {delta !== null && delta !== 0 && (
                 <span className={delta > 0 ? 'up' : 'down'}>
                   {delta > 0 ? '↑' : '↓'} 比上次 {delta > 0 ? '+' : ''}
@@ -287,38 +418,73 @@ export default function App() {
         {hasGuess && !over && pct >= 26 && pct < 75 && <div className="coach">{COACH[guesses.length % COACH.length]}</div>}
       </section>
 
+      <div className="modes" role="tablist">
+        <button
+          className={mode === 'guess' ? 'mode-btn on' : 'mode-btn'}
+          onClick={() => setMode('guess')}
+          role="tab"
+          aria-selected={mode === 'guess'}
+        >
+          猜词
+        </button>
+        <button
+          className={mode === 'ask' ? 'mode-btn on' : 'mode-btn'}
+          onClick={() => setMode('ask')}
+          role="tab"
+          aria-selected={mode === 'ask'}
+        >
+          问一句
+          <em>
+            {questions.length}/{game?.questionLimit ?? 10}
+          </em>
+        </button>
+      </div>
+
       <form className="entry" onSubmit={submit}>
         <input
           ref={inputRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={over ? '这一局结束了' : '输入一个词，蹭蹭看'}
-          maxLength={12}
-          disabled={!game || busy || !!over}
+          placeholder={
+            over
+              ? '这一局结束了'
+              : mode === 'ask'
+                ? questions.length >= (game?.questionLimit ?? 10)
+                  ? '问题额度用完了，猜词吧'
+                  : '问一个是非题，如：它是吃的吗？'
+                : '输入一个词，蹭蹭看'
+          }
+          maxLength={mode === 'ask' ? 40 : 12}
+          disabled={!game || busy || !!over || (mode === 'ask' && questions.length >= (game?.questionLimit ?? 10))}
           enterKeyHint="send"
           autoComplete="off"
         />
-        <button type="submit" disabled={!game || busy || !input.trim() || !!over}>
-          {busy ? '…' : '蹭一下'}
+        <button type="submit" disabled={!game || busy || !input.trim() || !!over || (mode === 'ask' && questions.length >= (game?.questionLimit ?? 10))}>
+          {busy ? '…' : mode === 'ask' ? '问一下' : '蹭一下'}
         </button>
       </form>
 
       {err && <div className="err">{err}</div>}
 
-      <div className="tally">
-        <span>
-          开始 <b>{startedAt ? fmtClock(startedAt) : '--:--'}</b>
-        </span>
-        <i />
-        <span>
-          用时 <b>{startedAt ? fmtDur((endedAt ?? tick) - startedAt) : '00:00'}</b>
-        </span>
-        <i />
-        <span>
-          已猜 <b>{guesses.length}</b>
-          <em>/{game?.attempts ?? 30}</em>
-        </span>
-      </div>
+      {questions.length > 0 && (
+        <section className="quiz">
+          <div className="qhead">
+            <span>问过的是非题</span>
+            <span className="hsub">判官说「是」的可能性</span>
+          </div>
+          <ul className="qlist">
+            {questions.map((q) => (
+              <li key={q.at}>
+                <span className="qt" title={`${q.by} 问的`}>{q.q}</span>
+                <span className="qbar">
+                  <i style={{ width: `${Math.max(2, q.yes)}%` }} />
+                </span>
+                <span className="qv">{q.yes >= 50 ? '是' : '否'} {q.yes >= 50 ? q.yes : 100 - q.yes}%</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="history">
         <div className="hhead">
@@ -330,6 +496,7 @@ export default function App() {
             <li key={g.word} className={i === 0 && guesses.length > 1 ? 'lead' : ''}>
               <span className="rank">{i + 1}</span>
               <span className="w">{g.word}</span>
+              <span className="by" title={`${g.by} 猜的`}>{g.by}</span>
               <span className="bar">
                 <i
                   style={{
@@ -363,7 +530,7 @@ export default function App() {
             <button className="ghost" onClick={() => void start()} disabled={!game}>
               换一个词
             </button>
-            <button className="ghost danger" onClick={() => void giveUp()} disabled={!game || !guesses.length}>
+            <button className="ghost danger" onClick={giveUp} disabled={!game || !guesses.length}>
               放弃，看答案
             </button>
           </>
@@ -388,9 +555,15 @@ export default function App() {
             <div className={`verdict-badge ${over.won ? 'win' : 'lose'}`}>{over.won ? '蹭到了' : '没蹭上'}</div>
             <div className="answer">{over.answer}</div>
             <div className="sub">
-              {over.won
-                ? `用了 ${guesses.length} 次 · 最高热度 ${best?.pct ?? 0}`
-                : `${game?.attempts ?? 30} 次机会用完了 · 最高热度 ${best?.pct ?? 0}`}
+              {over.won ? (
+                <>
+                  「{over.winner ?? '有人'}」猜中了 · 用了 {guesses.length} 次
+                </>
+              ) : over.reason === 'revealed' ? (
+                <>有人放弃了 · 最高热度 {best?.pct ?? 0}</>
+              ) : (
+                <>{game?.attempts ?? 30} 次机会用完了 · 最高热度 {best?.pct ?? 0}</>
+              )}
               {startedAt && <> · 用时 {fmtDur((endedAt ?? tick) - startedAt)}</>}
             </div>
             <div className="trail">

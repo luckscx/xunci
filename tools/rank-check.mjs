@@ -9,7 +9,7 @@ for (const x of WORD_POOL) (byCat[x.c] ||= []).push(x)
 const targets = Object.keys(byCat).slice(0, 14).map((c) => byCat[c][Math.floor(Math.random() * byCat[c].length)])
 
 for (const t of targets) {
-  const g = await post('/api/game')
+  const g = await post('/api/game?private=1')
   // 强制注入目标? 只统计：把全池都猜一遍，看答案排名
   const rows = []
   for (const x of WORD_POOL) {

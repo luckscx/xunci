@@ -22,7 +22,7 @@ console.log(`池内热梗 ${hot.length} 个，全池 ${WORD_POOL.length} 个`)
 let tested = 0
 const results = []
 for (let i = 0; i < 400 && tested < 5; i++) {
-  const g = await post('/api/game')
+  const g = await post('/api/game?private=1')
   if (g.category !== '热梗') continue
   tested++
   const words = [...(anchors[g.answer] || []), g.answer].filter(Boolean)

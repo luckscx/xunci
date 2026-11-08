@@ -176,14 +176,55 @@ body {
   }
 }
 
-.tally {
+.players {
   display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 0 2px 12px;
+  font-size: 11px;
+  color: #5f6879;
+}
+.players .pc {
+  white-space: nowrap;
+  margin-right: 2px;
+}
+.players .p {
+  font: inherit;
+  color: #9aa4b8;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 3px 9px;
+  cursor: default;
+}
+.players .p.me {
+  color: #ffd7b0;
+  border-color: rgba(255, 162, 106, 0.32);
+  background: rgba(255, 138, 76, 0.1);
+  cursor: pointer;
+}
+.players .p.me:active {
+  transform: scale(0.96);
+}
+.players .name-edit {
+  font: inherit;
+  color: #ffd7b0;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 162, 106, 0.4);
+  border-radius: 999px;
+  padding: 3px 9px;
+  width: 96px;
+  outline: none;
+}
+
+.tally {
+  display: inline-flex;
   align-items: center;
   gap: 10px;
   font-size: 11px;
   color: #6b768a;
-  padding: 0 2px;
-  margin: -2px 0 10px;
+  margin-left: auto;
 }
 .tally i {
   width: 1px;
@@ -312,8 +353,121 @@ body {
 .entry {
   display: flex;
   gap: 8px;
-  margin: 12px 0;
+  margin: 8px 0 12px;
   flex-shrink: 0;
+}
+
+/* 模式切换：猜词 / 问一句 */
+.modes {
+  display: flex;
+  gap: 6px;
+  margin: 4px 0 0;
+  flex-shrink: 0;
+}
+
+.mode-btn {
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  color: #8d96ab;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: color 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+.mode-btn em {
+  font-style: normal;
+  font-size: 10px;
+  color: #5f6879;
+  font-variant-numeric: tabular-nums;
+}
+.mode-btn.on {
+  color: #ffd7b0;
+  border-color: rgba(255, 162, 106, 0.36);
+  background: rgba(255, 138, 76, 0.1);
+  font-weight: 600;
+}
+.mode-btn.on em {
+  color: #d9a06f;
+}
+.mode-btn:active {
+  transform: scale(0.96);
+}
+
+/* 是非题问答列表 */
+.quiz {
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+  min-height: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.qhead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12px;
+  color: #cdd4e2;
+  padding: 0 2px 6px;
+}
+.qhead .hsub {
+  color: #5f6879;
+  font-size: 11px;
+}
+.qlist {
+  list-style: none;
+  margin: 0;
+  padding: 0 2px 8px;
+  max-height: 116px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.qlist::-webkit-scrollbar {
+  display: none;
+}
+.qlist li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  animation: rowIn 260ms ease both;
+}
+.qlist .qt {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #d7deeb;
+}
+.qlist .qbar {
+  flex: 1;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+.qlist .qbar i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #45d3c6, #ffd166);
+  transition: width 500ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.qlist .qv {
+  flex: 0 0 auto;
+  width: 58px;
+  text-align: right;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: #aab3c5;
 }
 
 .entry input {
@@ -443,6 +597,18 @@ body {
 .hlist li.lead .w {
   color: #ffd7b0;
   font-weight: 700;
+}
+.hlist .by {
+  flex: 0 0 auto;
+  max-width: 64px;
+  font-size: 11px;
+  color: #5f6879;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hlist li.lead .by {
+  color: #b97f52;
 }
 .hlist .bar {
   flex: 1;
