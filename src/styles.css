@@ -138,7 +138,7 @@ body {
   transition: color 160ms ease, background 160ms ease;
 }
 /* 主玩法占更宽的一段；问题用完时提示下一步切到猜词 */
-.mode-btn.primary {
+.mode-btn.main {
   flex: 1.3;
 }
 .mode-btn.next {

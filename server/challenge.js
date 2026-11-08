@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { isReady } from './embedder.js'
 import { WORD_POOL } from './words.js'
 import { rateGuess, targetBaseline } from './scoring.js'
+import { askJudge, judgeConfigured, checkAsk } from './judge.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const FILE = join(ROOT, 'data', 'challenge.json')
@@ -18,15 +19,18 @@ const MAX_PLAYERS = 100
 export const RULES = {
   levels: 4,
   timeLimitMs: 6 * 60_000,
-  guessLimit: 40,
-  /** 综合分：一次猜词折算 30 秒，于是「次数 + 时间」变成同一个量纲，越低越好 */
+  /** 主玩法问一问的整轮额度（4 题共享），判官未配置时为 0 */
+  questionLimit: 10,
+  /** 猜词额度（4 题共享），问不消耗猜词次数 */
+  guessLimit: 30,
+  /** 综合分：一步（问或猜）折算 30 秒，于是「步数 + 时间」变成同一个量纲，越低越好 */
   perGuessSeconds: 30,
   /** 每题猜几次后给字数提示 */
   hintAfter: 3,
 }
 
 /**
- * 23 个细分分类太碎，选领域时按语义聚合成 7 个领域。
+ * 24 个细分分类太碎，选领域时按语义聚合成 8 个领域。
  * 只影响闯关模式；房间对局的分类提示仍用 words.js 里的细分类。
  */
 export const DOMAINS = [
@@ -36,6 +40,7 @@ export const DOMAINS = [
   { name: '科技出行', groups: ['科技', '交通', '工具'] },
   { name: '文体娱乐', groups: ['运动', '音乐', '影视'] },
   { name: '脑洞抽象', groups: ['情绪', '抽象', '学科'] },
+  { name: '历史', groups: ['历史'] },
   { name: '网络热梗', groups: ['热梗'] },
 ]
 
@@ -153,7 +158,7 @@ async function createSession(domain, playerId, name) {
     // 等基准算完才开始计时，模型冷启动不占用玩家的时间预算
     deadline: startedAt + RULES.timeLimitMs,
     levels: picked.map((t, i) => ({
-      word: t.w, difficulty: t.d, base: bases[i], guesses: [], cleared: false, clearedAt: null,
+      word: t.w, difficulty: t.d, base: bases[i], guesses: [], questions: [], cleared: false, clearedAt: null,
     })),
     index: 0,
     used: 0,
@@ -169,9 +174,9 @@ async function createSession(domain, playerId, name) {
 }
 
 /** 记录通关成绩：同一玩家在同一领域只保留最好的一次，避免一个人刷满整张榜 */
-function record(c, seconds) {
+function record(c, seconds, steps) {
   const list = boards.get(c.category) || []
-  upsert(list, { playerId: c.playerId, name: c.name, used: c.used, seconds, score: c.score, at: c.finishedAt })
+  upsert(list, { playerId: c.playerId, name: c.name, used: steps, seconds, score: c.score, at: c.finishedAt })
   sortEntries(list)
   const rank = list.findIndex((e) => e.playerId === c.playerId) + 1
   boards.set(c.category, list.slice(0, MAX_PLAYERS))
@@ -188,8 +193,10 @@ function finish(c, result) {
   c.result = result
   if (result === 'cleared') {
     const seconds = Math.max(0, Math.round((at - c.startedAt) / 1000))
-    c.score = c.used * RULES.perGuessSeconds + seconds
-    c.rank = record(c, seconds)
+    // 问与猜都消耗玩家的时间预算（问还消耗判官成本），综合分按总步数计
+    const steps = c.used + c.levels.reduce((s, l) => s + l.questions.length, 0)
+    c.score = steps * RULES.perGuessSeconds + seconds
+    c.rank = record(c, seconds, steps)
   }
 }
 
@@ -216,6 +223,11 @@ function publicState(c) {
       difficulty: l.difficulty,
     })),
     guesses: cur.guesses.map((g) => ({ word: g.word, pct: g.pct, at: g.at })),
+    questions: cur.questions.map((x) => ({ q: x.q, yes: x.yes, at: x.at })),
+    /** 整轮已问总数（4 题共享额度） */
+    asked: c.levels.reduce((s, l) => s + l.questions.length, 0),
+    questionLimit: RULES.questionLimit,
+    judgeReady: judgeConfigured(),
     used: c.used,
     guessLimit: RULES.guessLimit,
     startedAt: c.startedAt,
@@ -240,7 +252,7 @@ export const challengeRouter = Router()
 
 challengeRouter.get('/categories', (req, res) => {
   // categories 是同内容的兼容别名，老版本前端也能正常显示
-  res.json({ domains: DOMAIN_VIEW, categories: DOMAIN_VIEW, rules: RULES })
+  res.json({ domains: DOMAIN_VIEW, categories: DOMAIN_VIEW, rules: RULES, judgeReady: judgeConfigured() })
 })
 
 challengeRouter.get('/leaderboard', (req, res) => {
@@ -319,6 +331,50 @@ challengeRouter.post('/guess', async (req, res) => {
   } catch (e) {
     console.error('challenge guess failed', e)
     bad(res, 502, '服务器打了个喷嚏，再试一次')
+  } finally {
+    c.busy = false
+  }
+})
+
+// 主玩法问一问：判官站在当前题答案的立场回答"是"的概率。
+// 问消耗整轮的问句额度，不消耗猜词次数，也不结束挑战（超时除外）。
+challengeRouter.post('/ask', async (req, res) => {
+  const c = findSession(req.body?.id)
+  if (!c) return bad(res, 404, '这次挑战已经过期了，重新选个领域吧')
+  checkTimeout(c)
+  if (c.finished) return bad(res, 400, '这次挑战已经结束了')
+  if (!judgeConfigured()) return bad(res, 403, '判官未配置（需要 TYPESAFE_API_KEY），用猜词吧')
+  const v = checkAsk(req.body?.q)
+  if (v.error) return bad(res, 400, v.error)
+  if (c.busy) return bad(res, 409, '上一个问题判官还在想，稍等一下')
+
+  const level = c.levels[c.index]
+  const levelNo = c.index + 1
+  const askedCount = () => c.levels.reduce((s, l) => s + l.questions.length, 0)
+  const dup = level.questions.find((x) => x.q === v.q)
+  // 同一题里重复问同一个问题直接回缓存答案，不消耗额度
+  if (dup) {
+    return res.json({
+      ...publicState(c),
+      answer: { q: v.q, yes: dup.yes, dup: true, asked: askedCount(), level: levelNo },
+    })
+  }
+  if (askedCount() >= RULES.questionLimit) {
+    return bad(res, 403, '这轮的是非题用完了，切到猜词收尾吧')
+  }
+
+  c.busy = true
+  try {
+    const yes = await askJudge(v.q, level.word, c.category)
+    level.questions.push({ q: v.q, yes, at: Date.now() })
+    if (!c.finished && Date.now() >= c.deadline) finish(c, 'timeout')
+    res.json({
+      ...publicState(c),
+      answer: { q: v.q, yes, dup: false, asked: askedCount(), level: levelNo },
+    })
+  } catch (e) {
+    console.error('challenge ask failed', e)
+    bad(res, 502, '判官走神了，再问一次')
   } finally {
     c.busy = false
   }

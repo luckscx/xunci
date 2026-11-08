@@ -9,7 +9,7 @@ import { pickTarget, WORD_POOL } from './words.js'
 import { assocOf, assocStats } from './assoc.js'
 import { rateGuess, targetBaseline } from './scoring.js'
 import { challengeRouter } from './challenge.js'
-import { askJudge, judgeConfigured } from './judge.js'
+import { askJudge, judgeConfigured, checkAsk } from './judge.js'
 import { loadState, touch, startPersist } from './store.js'
 import { config, loadConfig, updateConfig } from './config.js'
 
@@ -53,8 +53,6 @@ function persistState() {
 }
 
 const norm = (s) => String(s || '').replace(/\s+/g, '').replace(/[，。！？,.!?]/g, '').trim()
-/** 是非题保留标点（问句要通顺），只折叠空白 */
-const normQ = (s) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, 40)
 
 function cleanup() {
   const now = Date.now()
@@ -233,16 +231,6 @@ async function doAsk(g, q, by, byId) {
   g.questions.push({ q, yes, by, byId, at: Date.now() })
   touch()
   return { dup: false, yes }
-}
-
-/** 是非题入参校验，通过返回归一化问句，否则返回错误文案 */
-function checkAsk(raw) {
-  const q = normQ(raw)
-  if (q.length < 2) return { error: '问题太短了，比如「它是吃的吗？」' }
-  if (!/[\u4e00-\u9fa5]/.test(q)) return { error: '请用中文提问' }
-  if (!/[吗呢么?？]$/.test(q)) return { error: '请问一个是非题（以「吗/呢/?」结尾）' }
-  if (!judgeConfigured()) return { error: '是非题判官还没配置（需要 TYPESAFE_API_KEY）' }
-  return { q }
 }
 
 // ---------- REST ----------

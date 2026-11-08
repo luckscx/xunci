@@ -3,7 +3,7 @@ import * as api from './api'
 import * as net from './net'
 import Challenge from './Challenge'
 import { loadMe } from './me'
-import { tempOf } from './game'
+import { tempOf, confOf } from './game'
 import { isMuted, playDup, playLose, playTap, playTier, setMuted } from './sfx'
 
 function useAnimatedNumber(target: number, ms = 520) {
@@ -27,8 +27,6 @@ function useAnimatedNumber(target: number, ms = 520) {
   }, [target, ms])
   return val
 }
-
-const confOf = (yes: number) => ({ yes: yes >= 50, conf: Math.round(yes >= 50 ? yes : 100 - yes) })
 
 export default function App() {
   const [me] = useState(() => loadMe())
@@ -291,7 +289,7 @@ export default function App() {
       {/* 主玩法在左且默认选中；问题用完时把猜词标成下一步 */}
       <div className="modes" role="tablist">
         <button
-          className={mode === 'ask' ? 'mode-btn primary on' : 'mode-btn primary'}
+          className={mode === 'ask' ? 'mode-btn main on' : 'mode-btn main'}
           onClick={() => setMode('ask')}
           role="tab"
           aria-selected={mode === 'ask'}

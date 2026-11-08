@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from './api'
-import { tempOf } from './game'
+import { confOf, tempOf } from './game'
 import { playDup, playLose, playTap, playTier } from './sfx'
 import './challenge.css'
 
@@ -13,7 +13,7 @@ const clock = (ms: number) => {
 
 type Screen = 'pick' | 'board' | 'run'
 
-/** 选领域 → 连闯 4 题 → 结算上榜；时间、次数、成绩全部由服务端裁定 */
+/** 选领域 → 连闯 4 题 → 结算上榜；主玩法问一问，猜词收尾，时间与次数全部由服务端裁定 */
 export default function Challenge({ me }: { me: api.Identity }) {
   const [screen, setScreen] = useState<Screen>('pick')
   const [domains, setDomains] = useState<api.ChallengeDomain[]>([])
@@ -27,12 +27,16 @@ export default function Challenge({ me }: { me: api.Identity }) {
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(false)
   const [tick, setTick] = useState(Date.now())
+  // 主玩法与自由玩保持一致：默认问一问，判官不可用时回落猜词
+  const [mode, setMode] = useState<'ask' | 'guess'>('ask')
+  const [judgeReady, setJudgeReady] = useState(true)
   const clockRef = useRef({ now: 0, at: 0 })
   const timeoutSyncRef = useRef(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const apply = useCallback((s: api.ChallengeState) => {
     setSession(s)
+    setJudgeReady(s.judgeReady !== false)
     clockRef.current = { now: s.now, at: Date.now() }
     setTick(Date.now())
     try {
@@ -51,6 +55,7 @@ export default function Challenge({ me }: { me: api.Identity }) {
         if (!alive) return
         setDomains(d.domains)
         setRules(d.rules)
+        setJudgeReady(d.judgeReady !== false)
         setBoardDomain((prev) => prev || d.domains[0]?.name || '')
       })
       .catch(() => { if (alive) setErr('领域列表加载失败，刷新页面试试') })
@@ -58,7 +63,12 @@ export default function Challenge({ me }: { me: api.Identity }) {
       const id = localStorage.getItem(SESSION_KEY)
       if (id) {
         void api.challengeSession(id)
-          .then((s) => { if (alive) { apply(s); setScreen('run') } })
+          .then((s) => {
+            if (!alive) return
+            apply(s)
+            setMode(s.judgeReady === false ? 'guess' : 'ask')
+            setScreen('run')
+          })
           .catch(() => localStorage.removeItem(SESSION_KEY))
       }
     } catch {
@@ -94,6 +104,13 @@ export default function Challenge({ me }: { me: api.Identity }) {
     void api.challengeSession(session.id).then(apply).catch(() => {})
   }, [screen, session, leftMs, busy, apply])
 
+  const qLimit = rules?.questionLimit ?? 10
+  const askOff = !judgeReady || qLimit === 0
+  // 判官没配 / 管理员把问句额度设为 0 时自动回落到猜词，别让主玩法卡住玩家
+  useEffect(() => {
+    if (askOff && mode === 'ask') setMode('guess')
+  }, [askOff, mode])
+
   const start = useCallback(async (domain: string) => {
     setErr('')
     setFlash('')
@@ -103,6 +120,7 @@ export default function Challenge({ me }: { me: api.Identity }) {
       try {
         const s = await api.challengeStart(domain, me)
         apply(s)
+        setMode(s.judgeReady === false ? 'guess' : 'ask')
         timeoutSyncRef.current = false
         setInput('')
         setScreen('run')
@@ -126,31 +144,47 @@ export default function Challenge({ me }: { me: api.Identity }) {
     e.preventDefault()
     const text = input.trim()
     if (!session || session.finished || !text || busy) return
+    if (mode === 'ask' && askOff) return
     setBusy(true)
     setErr('')
     setFlash('')
     playTap()
     setInput('')
+    // 判官要等模型回话，网络挂起时兜底解锁
+    const guard = mode === 'ask' ? window.setTimeout(() => setBusy(false), 25000) : 0
     try {
-      const r = await api.challengeGuess(session.id, text)
-      apply(r)
-      const g = r.guess
-      if (g?.dup) {
-        playDup()
-        setErr(`「${text}」这题猜过了，换一个`)
-      } else if (g) {
-        playTier(g.pct)
-        if (g.exact && !r.finished) {
-          setFlash(`第 ${g.level} 题蹭到了，下一题`)
-          window.setTimeout(() => setFlash(''), 2200)
+      if (mode === 'ask') {
+        const r = await api.challengeAsk(session.id, text)
+        apply(r)
+        const a = r.answer
+        if (a?.dup) {
+          playDup()
+          setErr('这个问题问过了，换一个')
+        } else if (a) {
+          playTier(a.yes)
         }
-        if (r.finished && r.result !== 'cleared') window.setTimeout(() => playLose(), 520)
-      } else if (r.finished) {
-        playLose()
+      } else {
+        const r = await api.challengeGuess(session.id, text)
+        apply(r)
+        const g = r.guess
+        if (g?.dup) {
+          playDup()
+          setErr(`「${text}」这题猜过了，换一个`)
+        } else if (g) {
+          playTier(g.pct)
+          if (g.exact && !r.finished) {
+            setFlash(`第 ${g.level} 题蹭到了，下一题`)
+            window.setTimeout(() => setFlash(''), 2200)
+          }
+          if (r.finished && r.result !== 'cleared') window.setTimeout(() => playLose(), 520)
+        } else if (r.finished) {
+          playLose()
+        }
       }
     } catch (e) {
       setErr((e as Error).message || '网络开小差了')
     } finally {
+      window.clearTimeout(guard)
       setBusy(false)
     }
   }
@@ -182,18 +216,32 @@ export default function Challenge({ me }: { me: api.Identity }) {
   }
 
   const guesses = session?.guesses ?? []
+  const questions = session?.questions ?? []
   const last = guesses.length ? guesses[guesses.length - 1] : null
+  const lastQ = questions.length ? questions[questions.length - 1] : null
+  const q = lastQ ? confOf(lastQ.yes) : null
   const pct = last?.pct ?? 0
   const temp = tempOf(pct)
   const sorted = useMemo(() => [...guesses].sort((a, b) => b.pct - a.pct), [guesses])
   const bestPct = sorted[0]?.pct ?? 0
+  const qLeft = session ? Math.max(0, session.questionLimit - session.asked) : 0
+  const gLeft = session ? Math.max(0, session.guessLimit - session.used) : 0
+  const askFull = qLeft === 0
   const hintAfter = rules?.hintAfter ?? 3
   const hint = session?.hint
     ? `提示 · ${session.hint.chars} 个字`
     : `提示 · 再猜 ${Math.max(1, hintAfter - guesses.length)} 次给字数`
   const resultLine = session?.result === 'timeout'
     ? '时间到了，下次再快一点'
-    : session?.result === 'exhausted' ? '总次数用完了' : '已放弃本次挑战'
+    : session?.result === 'exhausted' ? '猜词次数用完了' : '已放弃本次挑战'
+  const disabled = !session || session.finished || busy || (mode === 'ask' && askFull)
+  const placeholder = !session || session.finished
+    ? '本次挑战已经结束'
+    : mode === 'ask'
+      ? askFull
+        ? '是非题用完了，切到猜词收尾'
+        : '问一个是非题，如：它是吃的吗？'
+      : '想到答案了？输入这个词'
 
   return (
     <div className="challenge">
@@ -201,14 +249,14 @@ export default function Challenge({ me }: { me: api.Identity }) {
         <div className="pick">
           <div className="pick-head">
             <h1>挑一个你最擅长的领域</h1>
-            <p>相近的分类已经合并成 {domains.length} 个领域。4 道题连着猜，猜得越少、用得越快，排名越靠前；全部通关，你就是这一领域的专家。</p>
+            <p>相近的分类已经合并成 {domains.length} 个领域。先用是非题缩小范围，再用热度锁定答案；猜得越少、用得越快，排名越靠前。全部通关，你就是这一领域的专家。</p>
           </div>
           <div className="rules">
             <span><b>{rules?.levels ?? 4}</b> 道题</span>
             <span><b>{Math.round((rules?.timeLimitMs ?? 360000) / 60000)}</b> 分钟总时限</span>
-            <span><b>{rules?.guessLimit ?? 40}</b> 次总次数</span>
+            <span><b>{rules?.questionLimit ?? 10} 问 + {rules?.guessLimit ?? 30} 次</b> 额度</span>
           </div>
-          <div className="rule-note">综合分 = 猜词次数 × {rules?.perGuessSeconds ?? 30} + 用时秒数，越低越好</div>
+          <div className="rule-note">综合分 = 问与猜的总步数 × {rules?.perGuessSeconds ?? 30} + 用时秒数，越低越好</div>
           <div className="cat-grid">
             {domains.map((d) => (
               <button key={d.name} className="cat-btn" onClick={() => void start(d.name)} disabled={loading}>
@@ -264,7 +312,8 @@ export default function Challenge({ me }: { me: api.Identity }) {
             <span className="run-cat">{session.category} · 第 {session.level}/{session.total} 题</span>
             <span className="hud">
               <span className={leftMs < 60_000 ? 'urgent' : ''}>{clock(leftMs)}</span>
-              <span>还剩 <b>{Math.max(0, session.guessLimit - session.used)}</b> 次</span>
+              <span>还剩 <b>{qLeft}</b> 问</span>
+              <span><b>{gLeft}</b> 次</span>
             </span>
           </div>
           <div className="steps">
@@ -273,16 +322,57 @@ export default function Challenge({ me }: { me: api.Identity }) {
             ))}
           </div>
 
-          <section className="gauge">
-            <div className="num">
-              {last ? pct : '?'}<span className="unit">/ 100</span>
-            </div>
-            <div className="verdict">
-              <b>{last ? temp.label : '猜一个词'}</b>
-              <span>{last ? `「${last.word}」` : '越靠近答案，热度越高'}</span>
-            </div>
+          {/* 主玩法问一问在左且默认选中；判官不可用时禁用并回落猜词 */}
+          <div className="modes" role="tablist">
+            <button
+              className={mode === 'ask' ? 'mode-btn main on' : 'mode-btn main'}
+              onClick={() => setMode('ask')}
+              role="tab"
+              aria-selected={mode === 'ask'}
+              disabled={askOff}
+              title={askOff ? '判官未配置（需要 TYPESAFE_API_KEY）' : '主玩法：用是非题逼近答案'}
+            >
+              问一句<em>{qLeft} 问</em>
+            </button>
+            <button
+              className={mode === 'guess' ? 'mode-btn on' : 'mode-btn'}
+              onClick={() => setMode('guess')}
+              role="tab"
+              aria-selected={mode === 'guess'}
+              title="想到答案了？用热度锁定"
+            >
+              猜词<em>{gLeft} 次</em>
+            </button>
+          </div>
+
+          <section className={`gauge ${mode === 'ask' ? 'ask' : ''}`}>
+            {mode === 'ask' ? (
+              <>
+                <div className={`num ${q?.yes ? 'q-yes' : 'q-no'}`}>{q ? (q.yes ? '是' : '否') : '?'}</div>
+                <div className="verdict">
+                  <b>{q ? `${q.conf}% 把握` : '问一个是非题'}</b>
+                  <span>{q ? `「${lastQ?.q}」` : '判官会回答是或否'}</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="num">
+                  {last ? pct : '?'}<span className="unit">/ 100</span>
+                </div>
+                <div className="verdict">
+                  <b>{last ? temp.label : '猜一个词'}</b>
+                  <span>{last ? `「${last.word}」` : '越靠近答案，热度越高'}</span>
+                </div>
+              </>
+            )}
             <div className="thermo">
-              <div className="fill" style={{ width: `${Math.max(2, pct)}%`, background: `hsl(${temp.hue} 90% 64%)` }} />
+              <div
+                className="fill"
+                style={{
+                  width: `${mode === 'ask' ? Math.max(2, q?.conf ?? 0) : Math.max(2, pct)}%`,
+                  background: mode === 'ask' ? (q?.yes ? '#74c9ad' : '#7f8ba3') : `hsl(${temp.hue} 90% 64%)`,
+                }}
+              />
             </div>
             <div className="chips">
               <span className={`chip cat ${session.hint ? 'unlocked' : ''} ${flash ? 'flash' : ''}`}>{flash || hint}</span>
@@ -291,10 +381,32 @@ export default function Challenge({ me }: { me: api.Identity }) {
 
           <section className="history">
             <div className="hhead">
-              <span>第 {session.level} 题 · 猜过的词</span>
-              <span className="hsub">{guesses.length ? `最热 ${bestPct}` : '按热度排'}</span>
+              <span>第 {session.level} 题 · {mode === 'ask' ? '问过的是非题' : '猜过的词'}</span>
+              <span className="hsub">
+                {mode === 'ask'
+                  ? `还剩 ${qLeft} 问`
+                  : guesses.length ? `最热 ${bestPct}` : '按热度排'}
+              </span>
             </div>
-            {guesses.length ? (
+            {mode === 'ask' ? (
+              questions.length ? (
+                <ul className="hlist">
+                  {[...questions].reverse().map((item) => {
+                    const v = confOf(item.yes)
+                    return (
+                      <li key={item.at} className={v.yes ? 'lead' : ''}>
+                        <span className="w">{item.q}</span>
+                        <span className={`qv ${v.yes ? 'yes' : 'no'}`}>
+                          {v.yes ? '是' : '否'} {v.conf}%
+                        </span>
+                      </li>
+                    )
+                  })}
+                </ul>
+              ) : (
+                <div className="empty">问过的问题和判官的回答会记在这里，问得差不多就切到猜词收尾</div>
+              )
+            ) : guesses.length ? (
               <ul className="hlist">
                 {sorted.map((g, i) => (
                   <li key={g.word} className={i === 0 && guesses.length > 1 ? 'lead' : ''}>
@@ -316,14 +428,14 @@ export default function Challenge({ me }: { me: api.Identity }) {
               ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder={session.finished ? '本次挑战已经结束' : '输入一个词，看看离答案多近'}
-              maxLength={12}
-              disabled={session.finished || busy}
+              placeholder={placeholder}
+              maxLength={mode === 'ask' ? 40 : 12}
+              disabled={disabled}
               enterKeyHint="send"
               autoComplete="off"
             />
-            <button type="submit" disabled={session.finished || busy || !input.trim()}>
-              {busy ? '…' : '蹭一下'}
+            <button type="submit" disabled={disabled || !input.trim()}>
+              {busy ? '…' : mode === 'ask' ? '问一下' : '蹭一下'}
             </button>
           </form>
 
@@ -343,12 +455,12 @@ export default function Challenge({ me }: { me: api.Identity }) {
                 <div className="answer">{session.index} / {session.total}</div>
                 <div className="sub">
                   {session.result === 'cleared'
-                    ? `用了 ${session.used} 次 · 用时 ${clock(session.elapsedMs)} · 榜单第 ${session.rank} 名`
-                    : `${resultLine} · 用了 ${session.used} 次`}
+                    ? `问了 ${session.asked} 问 · 猜了 ${session.used} 次 · 用时 ${clock(session.elapsedMs)} · 榜单第 ${session.rank} 名`
+                    : `${resultLine} · 问了 ${session.asked} 问 · 猜了 ${session.used} 次`}
                 </div>
                 <div className="score-line">
                   综合分 {session.score ?? '—'}
-                  <span>次数 × {session.rules.perGuessSeconds} + 用时秒数，越低越好</span>
+                  <span>步数（问 + 猜）× {session.rules.perGuessSeconds} + 用时秒数，越低越好</span>
                 </div>
                 <div className="answers">
                   {session.levels.map((l, i) => (

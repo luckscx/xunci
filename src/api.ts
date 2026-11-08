@@ -77,6 +77,7 @@ export async function roomState(): Promise<RoomState> {
 export type ChallengeRules = {
   levels: number
   timeLimitMs: number
+  questionLimit: number
   guessLimit: number
   perGuessSeconds: number
   hintAfter: number
@@ -104,6 +105,13 @@ export type ChallengeState = {
   levels: ChallengeLevel[]
   /** 当前这一题猜过的词 */
   guesses: ChallengeGuessEntry[]
+  /** 当前这一题问过的是非题 */
+  questions: { q: string; yes: number; at: number }[]
+  /** 整轮已问总数（4 题共享额度） */
+  asked: number
+  questionLimit: number
+  /** 判官是否可用；不可用时闯关自动只用猜词 */
+  judgeReady: boolean
   used: number
   guessLimit: number
   startedAt: number
@@ -124,6 +132,9 @@ export type ChallengeState = {
 export type ChallengeGuessResult = ChallengeState & {
   guess: { word: string; pct: number; exact: boolean; dup: boolean; level: number } | null
 }
+export type ChallengeAskResult = ChallengeState & {
+  answer: { q: string; yes: number; dup: boolean; asked: number; level: number } | null
+}
 export type BoardEntry = {
   rank: number
   playerId: string
@@ -135,7 +146,7 @@ export type BoardEntry = {
 }
 
 export const challengeDomains = () =>
-  get<{ domains: ChallengeDomain[]; rules: ChallengeRules }>('/api/challenge/categories')
+  get<{ domains: ChallengeDomain[]; rules: ChallengeRules; judgeReady: boolean }>('/api/challenge/categories')
 export const challengeLeaderboard = (domain: string) =>
   get<{ domain: string; entries: BoardEntry[]; rules: ChallengeRules }>(
     `/api/challenge/leaderboard?domain=${encodeURIComponent(domain)}`,
@@ -146,4 +157,6 @@ export const challengeSession = (id: string) =>
   get<ChallengeState>(`/api/challenge/session?id=${encodeURIComponent(id)}`)
 export const challengeGuess = (id: string, word: string) =>
   post<ChallengeGuessResult>('/api/challenge/guess', { id, word })
+export const challengeAsk = (id: string, q: string) =>
+  post<ChallengeAskResult>('/api/challenge/ask', { id, q })
 export const challengeAbandon = (id: string) => post<ChallengeState>('/api/challenge/abandon', { id })

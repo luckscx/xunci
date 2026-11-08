@@ -1,5 +1,8 @@
 export type Temp = { label: string; desc: string; hue: number }
 
+/** 判官的"是"概率换算成方向与把握度，自由玩与闯关共用 */
+export const confOf = (yes: number) => ({ yes: yes >= 50, conf: Math.round(yes >= 50 ? yes : 100 - yes) })
+
 export function tempOf(pct: number): Temp {
   if (pct >= 100) return { label: '蹭到了', desc: '就是这个词，一分不多', hue: 6 }
   if (pct >= 95) return { label: '烫到极限', desc: '就差一个字，换个说法', hue: 10 }

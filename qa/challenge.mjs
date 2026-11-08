@@ -20,10 +20,10 @@ ok((await p.locator('.tally b').count()) === 1, '自由玩视图保留次数显�
 await p.locator('.views .view-btn').nth(1).click()
 await p.waitForSelector('.cat-grid .cat-btn')
 const n = await p.locator('.cat-grid .cat-btn').count()
-ok(n === 7, '聚合后只剩 7 个领域', n)
-ok((await p.locator('.cat-btn .grp').count()) === 7, '每张卡展示聚合的小类')
+ok(n === 8, '聚合后 8 个领域', n)
+ok((await p.locator('.cat-btn .grp').count()) === 8, '每张卡展示聚合的小类')
 const dom = await p.evaluate(async () => (await (await fetch('/api/challenge/categories')).json()).domains)
-ok(dom.reduce((s, d) => s + d.count, 0) === 223, '7 个领域覆盖全部 223 个词', dom.map((d) => d.count))
+ok(dom.reduce((s, d) => s + d.count, 0) === 239, '8 个领域覆盖词库全部词', dom.map((d) => d.count))
 const legacy = await p.evaluate(async () => (await fetch('/api/challenge/start', {
   method: 'POST', headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ category: '动物', playerId: 'qa-legacy' }),
@@ -34,7 +34,18 @@ ok((await p.locator('.rule-note').textContent())?.includes('综合分'), '规则
 await p.locator('.cat-grid .cat-btn').first().click()
 await p.waitForSelector('.run-head')
 ok((await p.locator('.steps .step').count()) === 4, '4 关进度条')
-ok((await p.locator('.hud').textContent())?.includes('还剩'), '总时间/总次数 HUD')
+ok((await p.locator('.hud').textContent())?.includes('问'), 'HUD 展示问句额度')
+const judgeReady = await p.evaluate(async () => (await (await fetch('/api/challenge/categories')).json()).judgeReady)
+ok(judgeReady, '判官可用（服务端需配置 TYPESAFE_API_KEY）')
+ok((await p.locator('.modes .mode-btn.on').textContent())?.includes('问一句'), '闯关默认主玩法是问一问')
+ok((await p.locator('.modes .mode-btn').nth(1).textContent())?.includes('猜词'), '猜词作为收尾玩法可见')
+
+// 问一问链路：判官回答 + 记入列表
+await p.fill('.entry input', '它是动物吗？')
+await p.click('.entry button')
+await p.waitForSelector('.hlist .qv', { timeout: 30000 })
+ok((await p.locator('.hlist .qv').count()) === 1, '判官回答记入问答列表')
+ok((await p.locator('.hhead').textContent())?.includes('是非题'), '问一问模式下展示问答列表')
 const id = await p.evaluate(() => localStorage.getItem('xunci.challenge.v1'))
 ok(!!id, '未完成挑战写入本地会话')
 
@@ -44,6 +55,8 @@ const st = await p.evaluate(async (sid) => {
 }, id)
 ok(st.devAnswers?.length === 4, '接口可读到 4 道题答案')
 
+// 切到猜词收尾，用调试答案通关
+await p.locator('.modes .mode-btn', { hasText: '猜词' }).click()
 for (let i = 0; i < st.devAnswers.length; i++) {
   await p.fill('.entry input', st.devAnswers[i])
   await p.click('.entry button')
@@ -54,6 +67,8 @@ await p.waitForSelector('.result-panel')
 ok((await p.locator('.verdict-badge').textContent())?.includes('领域专家'), '通关授予领域专家')
 ok((await p.locator('.score-line').textContent())?.includes('综合分'), '结算展示综合分')
 ok((await p.locator('.answers span').count()) === 4, '结算揭晓 4 个答案')
+const sub = await p.locator('.result-panel .sub').textContent()
+ok(sub?.includes('问了') && sub?.includes('猜了'), '结算展示问与猜的步数', sub)
 
 await p.locator('.panel-links .ghost').first().click()
 await p.waitForSelector('.board-list')
