@@ -14,6 +14,17 @@ PORT=3110 node server/index.js   # 单端口同时提供静态页和 /api
 
 首次启动会从 HuggingFace 拉 `Xenova/bge-small-zh-v1.5`（约 100MB），之后走本地缓存。
 
+## 部署到 Claw
+
+```bash
+npm run deploy:claw                          # 默认域名 xunci.grissom.cn
+DOMAIN=ciwen.grissom.cn npm run deploy:claw  # 换域名重跑即可
+```
+
+`*.grissom.cn` 已泛解析到 Claw，无需手工加 DNS 记录。脚本会构建前端、rsync 到 `/data/ciwen`、装生产依赖并同步 BGE 模型缓存、用 PM2 起 `ciwen`（`127.0.0.1:3110`）、写 Nginx 反代（含 `/ws`）并用 certbot 签发 HTTPS 证书，最后做 HTTP / WebSocket 自检。重复执行是幂等的：`data/`（对局与管理配置）、依赖和证书不会被重建。
+
+看日志：`ssh claw 'pm2 logs ciwen'`。
+
 开发模式：
 
 ```bash

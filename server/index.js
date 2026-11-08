@@ -17,6 +17,8 @@ const ADMIN_PATH = process.env.CIWEN_ADMIN_PATH || '/ciwen-manage-8f2k'
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
 const app = express()
+// 生产走 Nginx 反代：按 X-Forwarded-For 识别真实 IP，否则限流会让所有人共用一个桶
+app.set('trust proxy', 1)
 const server = http.createServer(app)
 const wss = new WebSocketServer({ server, path: '/ws' })
 
@@ -473,7 +475,8 @@ app.post(`${ADMIN_PATH}/api/config`, (req, res) => {
 
 // ---------- WebSocket ----------
 wss.on('connection', (ws, req) => {
-  const ip = req.socket.remoteAddress || '?'
+  // 生产经 Nginx 反代，同样取转发头里的真实 IP，避免 WebSocket 限流误伤
+  const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '?'
   ws.isAlive = true
   ws.on('pong', () => (ws.isAlive = true))
 
