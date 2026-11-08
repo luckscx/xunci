@@ -8,11 +8,12 @@ import { init, isReady, embedWord, baseline, overlap, score } from './embedder.j
 import { pickTarget } from './words.js'
 import { askJudge, judgeConfigured } from './judge.js'
 import { loadState, touch, startPersist } from './store.js'
+import { config, loadConfig, updateConfig } from './config.js'
 
 const PORT = process.env.PORT || 3110
 const HOST = process.env.HOST || '0.0.0.0'
-const ATTEMPTS = 30
-const QUESTIONS = 10 // 每局是非题额度，和猜词次数分开算
+// 管理页的隐藏入口，知道路径才能访问；前端页面上没有任何入口
+const ADMIN_PATH = process.env.CIWEN_ADMIN_PATH || '/ciwen-manage-8f2k'
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
 const app = express()
@@ -108,15 +109,16 @@ function sanitizeName(raw) {
 function publicGame(g) {
   return {
     id: g.id,
-    // 分类提示：猜满 CATEGORY_AT 次才随广播下发
-    category: g.guesses.length >= CATEGORY_AT ? g.category : null,
-    categoryAt: CATEGORY_AT,
+    // 分类提示：开启后猜满 categoryAt 次才随广播下发
+    category: config.categoryHint && g.guesses.length >= config.categoryAt ? g.category : null,
+    categoryAt: config.categoryHint ? config.categoryAt : null,
     difficulty: g.difficulty,
-    attempts: ATTEMPTS,
+    attempts: config.attempts,
     startedAt: g.created,
     guesses: g.guesses,
     questions: g.questions ?? [],
-    questionLimit: QUESTIONS,
+    questionLimit: config.questions,
+    allowReveal: config.allowReveal,
     finished: g.finished,
     endedAt: g.finishedAt ?? null,
     endReason: g.endReason ?? null,
@@ -210,7 +212,7 @@ async function doGuess(g, word, by, byId) {
     g.finishedAt = Date.now()
     g.endReason = 'guessed'
     g.winnerId = byId
-  } else if (g.guesses.length >= ATTEMPTS) {
+  } else if (g.guesses.length >= config.attempts) {
     g.finished = true
     g.finishedAt = Date.now()
     g.endReason = 'exhausted'
@@ -223,7 +225,7 @@ async function doGuess(g, word, by, byId) {
 async function doAsk(g, q, by, byId) {
   const dup = g.questions.find((x) => x.q === q)
   if (dup) return { dup: true, yes: dup.yes }
-  if (g.questions.length >= QUESTIONS) return { full: true }
+  if (g.questions.length >= config.questions) return { full: true }
   // 判官站在答案立场回答，返回"是"的概率 0-100
   const yes = await askJudge(q, g.word, g.category)
   g.questions.push({ q, yes, by, byId, at: Date.now() })
@@ -261,7 +263,7 @@ app.post('/api/game', async (req, res) => {
       id: g.id,
       category: g.category,
       difficulty: g.difficulty,
-      attempts: ATTEMPTS,
+      attempts: config.attempts,
       ...(process.env.CIWEN_DEV_HINT === '1' ? { answer: g.word } : {}),
     })
   }
@@ -280,13 +282,13 @@ app.post('/api/guess', async (req, res) => {
   if (limited(req.ip)) return res.status(429).json({ error: '猜得太快了，歇一下' })
 
   const r = await doGuess(g, word, 'API', null)
-  const category = g.guesses.length >= CATEGORY_AT ? g.category : null
+  const category = config.categoryHint && g.guesses.length >= config.categoryAt ? g.category : null
   if (r.dup) {
     return res.json({
       pct: r.pct,
       exact: false,
       dup: true,
-      attemptsLeft: ATTEMPTS - g.guesses.length,
+      attemptsLeft: config.attempts - g.guesses.length,
       best: bestOf(g),
       prev: g.guesses.length > 1 ? g.guesses[g.guesses.length - 2].pct : null,
       category,
@@ -297,7 +299,7 @@ app.post('/api/guess', async (req, res) => {
     pct: r.pct,
     exact: r.exact,
     rank: rankOf(g, r.pct),
-    attemptsLeft: ATTEMPTS - g.guesses.length,
+    attemptsLeft: config.attempts - g.guesses.length,
     best: bestOf(g),
     prev: g.guesses.length > 1 ? g.guesses[g.guesses.length - 2].pct : null,
     answer: g.finished ? g.word : undefined,
@@ -314,9 +316,9 @@ app.post('/api/ask', async (req, res) => {
 
   try {
     const r = await doAsk(g, v.q, 'API', null)
-    if (r.dup) return res.json({ yes: r.yes, dup: true, asked: g.questions.length, questionLimit: QUESTIONS })
+    if (r.dup) return res.json({ yes: r.yes, dup: true, asked: g.questions.length, questionLimit: config.questions })
     if (!g.private && g.id === room.gameId) broadcastState()
-    res.json({ yes: r.yes, dup: false, asked: g.questions.length, questionLimit: QUESTIONS })
+    res.json({ yes: r.yes, dup: false, asked: g.questions.length, questionLimit: config.questions })
   } catch (e) {
     console.error('ask failed', e)
     res.status(502).json({ error: '判官走神了，再问一次' })
@@ -326,12 +328,12 @@ app.post('/api/ask', async (req, res) => {
 app.post('/api/reveal', (req, res) => {
   const g = games.get(req.body?.id)
   if (!g) return res.status(404).json({ error: '这一局已经过期了' })
-  if (!g.finished) {
-    g.finished = true
-    g.finishedAt = Date.now()
-    g.endReason = 'revealed'
-    touch()
-  }
+  if (g.finished) return res.json({ answer: g.word, guesses: g.guesses.length })
+  if (!config.allowReveal) return res.status(403).json({ error: '管理员已关闭「放弃看答案」' })
+  g.finished = true
+  g.finishedAt = Date.now()
+  g.endReason = 'revealed'
+  touch()
   if (!g.private && g.id === room.gameId) broadcastState()
   res.json({ answer: g.word, guesses: g.guesses.length })
 })
@@ -343,6 +345,131 @@ function bestOf(g) {
 function rankOf(g, pct) {
   return g.guesses.filter((x) => x.pct > pct).length + 1
 }
+
+// ---------- 管理页（隐藏入口，仅自己知道路径） ----------
+const adminPage = `<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex,nofollow" />
+<title>寻词 · 管理</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: #14121f; color: #eee;
+    font: 15px/1.6 system-ui, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    display: flex; justify-content: center; padding: 40px 16px; }
+  main { width: 100%; max-width: 520px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: #999; font-size: 13px; margin-bottom: 24px; }
+  .card { background: #1e1b2e; border: 1px solid #33304a; border-radius: 12px; padding: 18px 20px; margin-bottom: 16px; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; }
+  .row + .row { border-top: 1px dashed #33304a; }
+  label b { display: block; font-size: 14px; }
+  label small { color: #999; font-size: 12px; }
+  input[type=number] { width: 90px; padding: 6px 10px; border-radius: 8px; border: 1px solid #44405e;
+    background: #14121f; color: #eee; font-size: 15px; text-align: center; }
+  input[type=number]:disabled { opacity: .35; }
+  .switch { position: relative; width: 46px; height: 26px; flex: none; }
+  .switch input { opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+  .switch i { position: absolute; inset: 0; border-radius: 13px; background: #44405e; transition: .15s; pointer-events: none; }
+  .switch i::after { content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px;
+    border-radius: 50%; background: #fff; transition: .15s; }
+  .switch input:checked + i { background: #e8722f; }
+  .switch input:checked + i::after { transform: translateX(20px); }
+  button { width: 100%; padding: 11px; border: 0; border-radius: 10px; background: #e8722f;
+    color: #fff; font-size: 15px; cursor: pointer; }
+  button:disabled { opacity: .5; }
+  .msg { text-align: center; font-size: 13px; min-height: 20px; margin-top: 10px; }
+  .msg.ok { color: #7ec97e; } .msg.bad { color: #e07a7a; }
+</style>
+</head>
+<body>
+<main>
+  <h1>寻词 · 全局管理</h1>
+  <div class="sub">改动立即生效并向所有在线玩家广播，无需重启</div>
+  <div class="card">
+    <div class="row">
+      <label><b>猜词次数上限</b><small>向量近似度猜词，每局可用次数</small></label>
+      <input type="number" id="attempts" min="1" max="200" />
+    </div>
+    <div class="row">
+      <label><b>问一问次数上限</b><small>每局是非题额度（0 = 禁用提问）</small></label>
+      <input type="number" id="questions" min="0" max="50" />
+    </div>
+  </div>
+  <div class="card">
+    <div class="row">
+      <label><b>允许「放弃，看答案」</b><small>关闭后前端按钮隐藏，接口也会拒绝</small></label>
+      <span class="switch"><input type="checkbox" id="allowReveal" /><i></i></span>
+    </div>
+    <div class="row">
+      <label><b>分类提示</b><small>关闭后整局不提示分类</small></label>
+      <span class="switch"><input type="checkbox" id="categoryHint" /><i></i></span>
+    </div>
+    <div class="row">
+      <label><b>猜几次后提示分类</b><small>分类提示开启时生效</small></label>
+      <input type="number" id="categoryAt" min="0" max="200" />
+    </div>
+  </div>
+  <button id="save">保存</button>
+  <div class="msg" id="msg"></div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id)
+async function loadCfg() {
+  const r = await fetch(location.pathname + '/api/config')
+  const c = await r.json()
+  $('attempts').value = c.attempts
+  $('questions').value = c.questions
+  $('categoryAt').value = c.categoryAt
+  $('allowReveal').checked = c.allowReveal
+  $('categoryHint').checked = c.categoryHint
+  $('categoryAt').disabled = $('categoryHint').checked ? false : true
+}
+$('categoryHint').addEventListener('change', (e) => { $('categoryAt').disabled = !e.target.checked })
+$('save').addEventListener('click', async () => {
+  const btn = $('save'); const msg = $('msg')
+  btn.disabled = true; msg.textContent = ''; msg.className = 'msg'
+  try {
+    const r = await fetch(location.pathname + '/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        attempts: +$('attempts').value,
+        questions: +$('questions').value,
+        categoryAt: +$('categoryAt').value,
+        allowReveal: $('allowReveal').checked,
+        categoryHint: $('categoryHint').checked,
+      }),
+    })
+    const d = await r.json()
+    if (!r.ok) throw new Error(d.error || '保存失败')
+    $('attempts').value = d.attempts; $('questions').value = d.questions
+    $('categoryAt').value = d.categoryAt
+    msg.textContent = '已保存并生效'; msg.className = 'msg ok'
+  } catch (e) { msg.textContent = e.message; msg.className = 'msg bad' }
+  btn.disabled = false
+})
+loadCfg()
+</script>
+</body>
+</html>`
+
+app.get(ADMIN_PATH, (req, res) => {
+  res.setHeader('Cache-Control', 'no-store')
+  res.type('html').send(adminPage)
+})
+
+app.get(`${ADMIN_PATH}/api/config`, (req, res) => res.json(config))
+
+app.post(`${ADMIN_PATH}/api/config`, (req, res) => {
+  const r = updateConfig(req.body)
+  if (!r.ok) return res.status(400).json({ error: r.error })
+  broadcastState() // 配置变更实时下发所有在线玩家
+  res.json(config)
+})
 
 // ---------- WebSocket ----------
 wss.on('connection', (ws, req) => {
@@ -406,7 +533,7 @@ wss.on('connection', (ws, req) => {
         if (limited(ip)) return sendNotice(ws, 'error', '问得太快了，歇一下')
         doAsk(g, v.q, me.name, me.id)
           .then((r) => {
-            if (r.full) return sendNotice(ws, 'error', `这局只有 ${QUESTIONS} 个问题，省着点问`)
+            if (r.full) return sendNotice(ws, 'error', `这局只有 ${config.questions} 个问题，省着点问`)
             if (r.dup) return sendNotice(ws, 'dup', '这个问题问过了')
             broadcastState()
           })
@@ -422,6 +549,7 @@ wss.on('connection', (ws, req) => {
         break
       }
       case 'reveal': {
+        if (!config.allowReveal) return sendNotice(ws, 'error', '管理员已关闭「放弃看答案」')
         const g = games.get(room.gameId)
         if (g && !g.finished) {
           g.finished = true
@@ -466,6 +594,7 @@ app.use((err, req, res, next) => {
 })
 
 startPersist(persistState)
+loadConfig()
 
 init()
   .then(() => {

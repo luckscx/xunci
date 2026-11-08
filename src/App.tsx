@@ -323,11 +323,9 @@ export default function App() {
       <div className="chips">
         {game?.category ? (
           <span className="chip cat unlocked">提示 · {game.category}</span>
-        ) : (
-          <span className="chip cat locked">
-            {game ? `分类 · 再猜 ${catLeft} 次解锁` : '分类 · …'}
-          </span>
-        )}
+        ) : game?.categoryAt != null ? (
+          <span className="chip cat locked">分类 · 再猜 {catLeft} 次解锁</span>
+        ) : null}
         {game?.hint && <span className="chip">{game.hint.chars} 个字</span>}
         <span className="tally">
           <span>
@@ -470,18 +468,22 @@ export default function App() {
         <section className="quiz">
           <div className="qhead">
             <span>问过的是非题</span>
-            <span className="hsub">判官说「是」的可能性</span>
+            <span className="hsub">判官的判断 · 条越长越笃定</span>
           </div>
           <ul className="qlist">
-            {questions.map((q) => (
-              <li key={q.at}>
-                <span className="qt" title={`${q.by} 问的`}>{q.q}</span>
-                <span className="qbar">
-                  <i style={{ width: `${Math.max(2, q.yes)}%` }} />
-                </span>
-                <span className="qv">{q.yes >= 50 ? '是' : '否'} {q.yes >= 50 ? q.yes : 100 - q.yes}%</span>
-              </li>
-            ))}
+            {questions.map((q) => {
+              const yes = q.yes >= 50
+              const conf = Math.round(yes ? q.yes : 100 - q.yes)
+              return (
+                <li key={q.at} className={yes ? 'ans-yes' : 'ans-no'}>
+                  <span className="qt" title={`${q.by} 问的`}>{q.q}</span>
+                  <span className="qbar">
+                    <i style={{ width: `${Math.max(2, conf)}%` }} />
+                  </span>
+                  <span className="qv">{yes ? '是' : '否'} {conf}%</span>
+                </li>
+              )
+            })}
           </ul>
         </section>
       )}
@@ -530,7 +532,7 @@ export default function App() {
             <button className="ghost" onClick={() => void start()} disabled={!game}>
               换一个词
             </button>
-            <button className="ghost danger" onClick={giveUp} disabled={!game || !guesses.length}>
+            <button className="ghost danger" onClick={giveUp} disabled={!game || !guesses.length || game.allowReveal === false}>
               放弃，看答案
             </button>
           </>

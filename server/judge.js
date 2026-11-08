@@ -5,7 +5,17 @@
 //   TYPESAFE_API_KEY  TypeSafe 平台的 key（不配则是非题模式提示未配置）
 //   TYPESAFE_MODEL    可选，默认 jev-latest
 
+import { readFileSync } from 'node:fs'
 import { noul, TypeSafeClient } from '@typesafe-ai/sdk'
+
+// 兜底加载项目根目录的 .env：不依赖 --env-file 启动参数，忘了带 flag 也能读到 key。
+// 真实环境变量优先（已存在的变量不覆盖），兼容 CRLF 行尾和带引号的值。
+try {
+  for (const line of readFileSync(new URL('../.env', import.meta.url), 'utf8').split('\n')) {
+    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/)
+    if (m && !(m[1] in process.env)) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '')
+  }
+} catch {}
 
 const MODEL = process.env.TYPESAFE_MODEL || 'jev-latest'
 

@@ -6,15 +6,17 @@ export type EndReason = 'guessed' | 'revealed' | 'exhausted'
 
 export type RoomGame = {
   id: string
-  /** 分类提示：猜满 categoryAt 次才解锁，之前为 null */
+  /** 分类提示：猜满 categoryAt 次才解锁；null = 管理员关闭了分类提示 */
   category: string | null
-  categoryAt: number
+  categoryAt: number | null
   difficulty: number
   attempts: number
   startedAt: number
   guesses: Entry[]
   questions: QuestionEntry[]
   questionLimit: number
+  /** 管理员是否允许「放弃，看答案」 */
+  allowReveal: boolean
   finished: boolean
   endedAt: number | null
   endReason: EndReason | null
