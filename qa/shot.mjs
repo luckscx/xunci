@@ -9,6 +9,7 @@ p.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()) })
 
 await p.goto('http://127.0.0.1:3110', { waitUntil: 'networkidle' })
 await p.waitForSelector('.chip.cat')
+await p.locator('.mode-btn', { hasText: '猜词' }).click()
 await p.waitForTimeout(400)
 await p.screenshot({ path: '/tmp/ciwen-xunci-idle.png' })
 

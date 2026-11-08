@@ -4,6 +4,7 @@ const c = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScal
 const p = await c.newPage()
 await p.goto('http://127.0.0.1:3110', { waitUntil: 'networkidle' })
 await p.waitForSelector('.chip.cat')
+await p.locator('.mode-btn', { hasText: '猜词' }).click()
 let tries = 0
 while (tries < 40) {
   const cat = await p.evaluate(() => document.querySelector('.chip.cat')?.textContent || '')

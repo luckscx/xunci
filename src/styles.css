@@ -137,6 +137,17 @@ body {
   cursor: pointer;
   transition: color 160ms ease, background 160ms ease;
 }
+/* 主玩法占更宽的一段；问题用完时提示下一步切到猜词 */
+.mode-btn.primary {
+  flex: 1.3;
+}
+.mode-btn.next {
+  box-shadow: inset 0 0 0 1px rgba(255, 154, 107, 0.35);
+}
+.mode-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 .mode-btn em {
   font-style: normal;
   font-size: 11px;

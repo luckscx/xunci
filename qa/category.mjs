@@ -1,4 +1,4 @@
-// 验证分类提示的门槛：前 9 次不给，第 10 次解锁并弹一下
+// 验证分类提示：按「问 + 猜」总步数达到 categoryAt 后解锁（切到辅助玩法猜词推进）
 import { chromium } from 'playwright'
 
 const b = await chromium.launch()
@@ -12,6 +12,7 @@ const words = ['汽车', '钢琴', '苹果', '足球', '医生', '银行', '月�
 
 await p.goto('http://127.0.0.1:3110', { waitUntil: 'networkidle' })
 await p.waitForSelector('.chip.cat')
+await p.locator('.mode-btn', { hasText: '猜词' }).click()
 
 const chip = () =>
   p.evaluate(() => {

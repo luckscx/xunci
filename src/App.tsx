@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from './api'
 import * as net from './net'
+import Challenge from './Challenge'
 import { loadMe } from './me'
 import { tempOf } from './game'
 import { isMuted, playDup, playLose, playTap, playTier, setMuted } from './sfx'
@@ -37,7 +38,9 @@ export default function App() {
   const [err, setErr] = useState('')
   const [boot, setBoot] = useState('正在连接服务器…')
   const [muted, setMutedState] = useState(() => isMuted())
-  const [mode, setMode] = useState<'guess' | 'ask'>('guess')
+  // 主玩法是「问一问」，猜词只负责最后锁定答案
+  const [mode, setMode] = useState<'guess' | 'ask'>('ask')
+  const [view, setView] = useState<'room' | 'challenge'>('room')
   const connRef = useRef<net.Conn | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const gameRef = useRef<api.RoomGame | null>(null)
@@ -45,6 +48,8 @@ export default function App() {
   const startingRef = useRef(false)
 
   const game = snap?.game ?? null
+  // 老服务不下发该字段时按可用处理
+  const judgeReady = snap?.judgeReady !== false
   const players = snap?.players ?? []
   const guesses = game?.guesses ?? []
   const questions = game?.questions ?? []
@@ -160,8 +165,16 @@ export default function App() {
   const left = Math.max(0, attempts - guesses.length)
   const qLimit = game?.questionLimit ?? 10
   const qLeft = Math.max(0, qLimit - questions.length)
-  const catLeft = Math.max(1, (game?.categoryAt ?? 10) - guesses.length)
+  // 线索按「问 + 猜」的总步数解锁，主玩法只问不猜也能推进
+  const actions = guesses.length + questions.length
+  const catLeft = Math.max(1, (game?.categoryAt ?? 10) - actions)
   const q = lastQ ? confOf(lastQ.yes) : null
+
+  // 判官没配 / 管理员关掉提问时自动回落到猜词，别让主玩法卡住玩家
+  const askOff = !judgeReady || qLimit === 0
+  useEffect(() => {
+    if (askOff && mode === 'ask') setMode('guess')
+  }, [askOff, mode])
 
   const over = game?.finished
     ? {
@@ -171,13 +184,16 @@ export default function App() {
         winner: game.winnerId ? players.find((p) => p.id === game.winnerId)?.name ?? null : null,
       }
     : null
+  const stat = `问了 ${questions.length} 问 · 猜了 ${guesses.length} 次`
 
   const heat = Math.min(1, Math.max(0, pct / 100))
+  const qHeat = Math.min(1, Math.max(0, (q?.conf ?? 0) / 100))
+  const hue = mode === 'ask' ? 162 : temp.hue
   const hint = game?.category
     ? `提示 · ${game.category}${game.hint ? ` · ${game.hint.chars} 个字` : ''}`
     : game?.categoryAt == null
       ? '提示 · 本局关闭'
-      : `提示 · 再猜 ${catLeft} 次解锁`
+      : `提示 · 再试 ${catLeft} 次解锁`
 
   function toggleMute() {
     const next = !muted
@@ -208,28 +224,53 @@ export default function App() {
     connRef.current?.send({ type: 'reveal' })
   }
 
-  const askFull = qLeft === 0
+  const askFull = qLeft === 0 || askOff
   const disabled = !game || busy || !!over || (mode === 'ask' && askFull)
   const placeholder = over
     ? '这一局结束了'
     : mode === 'ask'
       ? askFull
-        ? '问题用完了，切回猜词吧'
+        ? askOff
+          ? '提问未开放，用猜词吧'
+          : '问题用完了，切到猜词收尾'
         : '问一个是非题，如：它是吃的吗？'
-      : '输入一个词，看看离答案多近'
+      : '想到答案了？输入这个词'
 
   return (
     <div
       className="app"
-      style={{ ['--hue' as string]: String(temp.hue), ['--heat' as string]: String(heat) }}
+      style={{
+        ['--hue' as string]: view === 'challenge' ? '28' : String(hue),
+        ['--heat' as string]: view === 'challenge' ? '0.14' : String(mode === 'ask' ? qHeat : heat),
+      }}
     >
       <div className="bg" aria-hidden />
 
-      <header className="top">
+      <header className={`top ${view === 'challenge' ? 'solo' : ''}`}>
         <span className="logo">寻词</span>
-        <span className="tally">
-          还剩 <b>{left}</b> 次
-        </span>
+        <div className="views" role="tablist" aria-label="游戏模式">
+          <button
+            className={view === 'room' ? 'view-btn on' : 'view-btn'}
+            onClick={() => setView('room')}
+            role="tab"
+            aria-selected={view === 'room'}
+          >
+            自由玩
+          </button>
+          <button
+            className={view === 'challenge' ? 'view-btn on' : 'view-btn'}
+            onClick={() => setView('challenge')}
+            role="tab"
+            aria-selected={view === 'challenge'}
+          >
+            闯关
+          </button>
+        </div>
+        {view === 'room' && (
+          <span className="tally">
+            还剩 <b>{mode === 'ask' ? qLeft : left}</b> {mode === 'ask' ? '问' : '次'}
+          </span>
+        )}
         <button className="snd" onClick={toggleMute} aria-label={muted ? '打开音效' : '关闭音效'} title={muted ? '打开音效' : '关闭音效'}>
           {muted ? (
             <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden>
@@ -245,17 +286,32 @@ export default function App() {
         </button>
       </header>
 
-      {/* 两种玩法共用一个入口：切 tab 同时切换焦点反馈和下方记录 */}
+      {view === 'room' ? (
+        <>
+      {/* 主玩法在左且默认选中；问题用完时把猜词标成下一步 */}
       <div className="modes" role="tablist">
-        <button className={mode === 'guess' ? 'mode-btn on' : 'mode-btn'} onClick={() => setMode('guess')} role="tab" aria-selected={mode === 'guess'}>
-          猜词
-        </button>
-        <button className={mode === 'ask' ? 'mode-btn on' : 'mode-btn'} onClick={() => setMode('ask')} role="tab" aria-selected={mode === 'ask'}>
+        <button
+          className={mode === 'ask' ? 'mode-btn primary on' : 'mode-btn primary'}
+          onClick={() => setMode('ask')}
+          role="tab"
+          aria-selected={mode === 'ask'}
+          disabled={askOff}
+          title={askOff ? (judgeReady ? '本局关闭了提问' : '判官未配置（需要 TYPESAFE_API_KEY）') : '主玩法：用是非题逼近答案'}
+        >
           问一句<em>{qLeft} 问</em>
+        </button>
+        <button
+          className={mode === 'guess' ? `mode-btn on${askFull && !askOff ? ' next' : ''}` : `mode-btn${askFull && !askOff ? ' next' : ''}`}
+          onClick={() => setMode('guess')}
+          role="tab"
+          aria-selected={mode === 'guess'}
+          title="想到答案了？用猜词收尾"
+        >
+          猜词<em>{left} 次</em>
         </button>
       </div>
 
-      {/* 焦点卡：只回答「我现在离答案多近 / 判官刚说了什么」 */}
+      {/* 焦点卡：只回答「判官刚说了什么 / 我现在离答案多近」 */}
       <section className={`gauge ${mode === 'ask' ? 'ask' : ''}`}>
         {mode === 'guess' ? (
           <>
@@ -291,7 +347,7 @@ export default function App() {
         </div>
       </section>
 
-      {/* 一个列表，跟着玩法走：猜词按热度排序，问句按时间倒序 */}
+      {/* 一个列表，跟着玩法走：问句按时间倒序，猜词按热度排序 */}
       <section className="history">
         <div className="hhead">
           <span>{mode === 'guess' ? '猜过的词' : '问过的是非题'}</span>
@@ -311,7 +367,7 @@ export default function App() {
               ))}
             </ul>
           ) : (
-            <div className="empty">猜过的词和热度会记在这里，越靠上越接近答案</div>
+            <div className="empty">想到答案就输入这个词，命中即获胜</div>
           )
         ) : questions.length ? (
           <ul className="hlist">
@@ -328,7 +384,7 @@ export default function App() {
             })}
           </ul>
         ) : (
-          <div className="empty">问过的问题和判官的回答会记在这里</div>
+          <div className="empty">问过的问题和判官的回答会记在这里，问得差不多就切到猜词收尾</div>
         )}
       </section>
 
@@ -356,7 +412,7 @@ export default function App() {
             <button className="ghost" onClick={() => void start()} disabled={!game}>
               换一个词
             </button>
-            <button className="ghost danger" onClick={giveUp} disabled={!game || !guesses.length || game.allowReveal === false}>
+            <button className="ghost danger" onClick={giveUp} disabled={!game || !(guesses.length || questions.length) || game.allowReveal === false}>
               看答案
             </button>
           </>
@@ -366,6 +422,10 @@ export default function App() {
           </button>
         )}
       </footer>
+        </>
+      ) : (
+        <Challenge me={me} />
+      )}
 
       {boot && (
         <div className="boot">
@@ -375,19 +435,19 @@ export default function App() {
         </div>
       )}
 
-      {over && (
+      {view === 'room' && over && (
         <div className="overlay">
           <div className="panel">
             <div className={`verdict-badge ${over.won ? 'win' : 'lose'}`}>{over.won ? '蹭到了' : '没蹭上'}</div>
             <div className="answer">{over.answer}</div>
             <div className="sub">
               {over.won
-                ? `你猜中了 · 用了 ${guesses.length} 次`
+                ? `你猜中了 · ${stat}`
                 : over.winner
-                  ? `${over.winner} 猜中了 · ${guesses.length} 次`
+                  ? `${over.winner} 猜中了 · ${stat}`
                   : over.reason === 'revealed'
-                    ? `答案揭晓 · 最高热度 ${bestPct}`
-                    : `${attempts} 次用完 · 最高热度 ${bestPct}`}
+                    ? `答案揭晓 · ${stat}`
+                    : `${stat} · 最高热度 ${bestPct}`}
             </div>
             <div className="panel-actions">
               <button className="primary" onClick={() => void start()}>

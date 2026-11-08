@@ -14,6 +14,7 @@ p.on('response', async (r) => {
 })
 await p.goto(URL, { waitUntil: 'networkidle' })
 await p.waitForSelector('.chip.cat')
+await p.locator('.mode-btn', { hasText: '猜词' }).click()
 
 for (let i = 0; i < 60 && answer !== TARGET; i++) {
   await p.click('.foot .ghost')

@@ -34,6 +34,7 @@ await p.addInitScript(() => {
 
 await p.goto('http://127.0.0.1:3110', { waitUntil: 'networkidle' })
 await p.waitForSelector('.chip.cat')
+await p.locator('.mode-btn', { hasText: '猜词' }).click()
 
 async function guess(word) {
   const before = await p.evaluate(() => window.__osc.length)

@@ -26,6 +26,7 @@ for (const s of SIZES) {
 
   await page.goto(URL, { waitUntil: 'networkidle' })
   await page.waitForSelector('.chips .chip.cat:not(:empty)', { timeout: 30000 })
+  await page.locator('.mode-btn', { hasText: '猜词' }).click()
   await page.waitForTimeout(400)
 
   const box = await page.evaluate(() => ({

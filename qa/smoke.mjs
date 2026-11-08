@@ -10,6 +10,9 @@ p.on('console', (m) => { if (m.type() === 'error') errs.push('console: ' + m.tex
 
 await p.goto('http://127.0.0.1:3110', { waitUntil: 'networkidle' })
 await p.waitForTimeout(1200)
+// 默认进入主玩法「问一句」，这里切到辅助玩法验证猜词
+console.log('默认玩法:', await p.locator('.mode-btn.on').textContent())
+await p.locator('.mode-btn', { hasText: '猜词' }).click()
 
 const state = await p.evaluate(() => {
   const d = document.documentElement

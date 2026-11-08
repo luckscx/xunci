@@ -10,6 +10,7 @@ p.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()) })
 
 await p.goto('http://127.0.0.1:3110', { waitUntil: 'networkidle' })
 await p.waitForSelector('.tally')
+await p.locator('.mode-btn', { hasText: '猜词' }).click()
 const read = () => p.evaluate(() => Number(document.querySelector('.tally b')?.textContent ?? -1))
 
 const first = await read()

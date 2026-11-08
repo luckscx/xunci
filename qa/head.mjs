@@ -5,6 +5,7 @@ const c = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScal
 const p = await c.newPage()
 await p.goto('http://127.0.0.1:3110', { waitUntil: 'networkidle' })
 await p.waitForSelector('.chip.cat')
+await p.locator('.mode-btn', { hasText: '猜词' }).click()
 await p.fill('.entry input', '琴')
 await p.click('.entry button')
 await p.waitForTimeout(900)

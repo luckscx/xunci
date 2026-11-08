@@ -4,9 +4,11 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import http from 'node:http'
 import { WebSocketServer } from 'ws'
-import { init, isReady, embedWord, baseline, overlap, score } from './embedder.js'
+import { init, isReady } from './embedder.js'
 import { pickTarget, WORD_POOL } from './words.js'
 import { assocOf, assocStats } from './assoc.js'
+import { rateGuess, targetBaseline } from './scoring.js'
+import { challengeRouter } from './challenge.js'
 import { askJudge, judgeConfigured } from './judge.js'
 import { loadState, touch, startPersist } from './store.js'
 import { config, loadConfig, updateConfig } from './config.js'
@@ -31,7 +33,6 @@ app.use((req, res, next) => {
 
 /** 局：单进程内存即可，进程重启后大家重开一局 */
 const games = new Map()
-const baseCache = new Map()
 
 /** 公共房间：所有客户端共享的当前局，进度通过 /ws 广播同步 */
 const room = { gameId: null }
@@ -49,12 +50,6 @@ if (saved) {
 /** 当前需要落盘的完整状态（players 是连接态，不持久化） */
 function persistState() {
   return { room: { gameId: room.gameId }, games: [...games.values()] }
-}
-
-const cos = (a, b) => {
-  let s = 0
-  for (let i = 0; i < a.length; i++) s += a[i] * b[i]
-  return s
 }
 
 const norm = (s) => String(s || '').replace(/\s+/g, '').replace(/[，。！？,.!?]/g, '').trim()
@@ -89,14 +84,6 @@ function limited(ip) {
   return rec.n > 400
 }
 
-async function targetBaseline(word) {
-  if (baseCache.has(word)) return baseCache.get(word)
-  const v = await embedWord(word)
-  const b = await baseline(v)
-  baseCache.set(word, b)
-  return b
-}
-
 // ---------- 匿名昵称 ----------
 const ADJ = ['路过的', '好奇的', '刚睡醒的', '摸鱼的', '慢半拍的', '偷偷卷的', '爱凑热闹的', '不爱说话的', '迷路的', '打瞌睡的']
 const ANIMAL = ['橘猫', '水獭', '小熊猫', '刺猬', '企鹅', '柴犬', '仓鼠', '章鱼', '浣熊', '羊驼']
@@ -109,11 +96,24 @@ function sanitizeName(raw) {
 }
 
 // ---------- 状态广播 ----------
+/** 主玩法是「问一问」：线索按「问 + 猜」的总步数推进，问满额度再补一条字数提示 */
+function progress(g) {
+  const asked = g.questions?.length ?? 0
+  const actions = g.guesses.length + asked
+  return {
+    category: config.categoryHint && actions >= config.categoryAt ? g.category : null,
+    hint: !g.finished && (actions >= 15 || (config.questions > 0 && asked >= config.questions))
+      ? { chars: g.word.length }
+      : null,
+  }
+}
+
 function publicGame(g) {
+  const p = progress(g)
   return {
     id: g.id,
-    // 分类提示：开启后猜满 categoryAt 次才随广播下发
-    category: config.categoryHint && g.guesses.length >= config.categoryAt ? g.category : null,
+    // 分类提示：开启后玩满 categoryAt 步（问或猜）才随广播下发
+    category: p.category,
     categoryAt: config.categoryHint ? config.categoryAt : null,
     difficulty: g.difficulty,
     attempts: config.attempts,
@@ -128,7 +128,7 @@ function publicGame(g) {
     winnerId: g.winnerId ?? null,
     // 仅本地 QA 用：CIWEN_DEV_HINT=1 时提前返回答案，生产环境不设该变量
     answer: g.finished || process.env.CIWEN_DEV_HINT === '1' ? g.word : undefined,
-    hint: !g.finished && g.guesses.length >= 15 ? { chars: g.word.length } : null,
+    hint: p.hint,
   }
 }
 
@@ -138,6 +138,8 @@ function roomState() {
     type: 'state',
     now: Date.now(),
     ready: isReady(),
+    // 判官未配置时前端自动回落猜词，避免默认进入一个不能玩的主玩法
+    judgeReady: judgeConfigured(),
     game: g ? publicGame(g) : null,
     players: [...players.values()].map((p) => ({ id: p.id, name: p.name })),
   }
@@ -203,18 +205,9 @@ async function doGuess(g, word, by, byId) {
   const dup = g.guesses.find((x) => x.word === word)
   if (dup) return { dup: true, pct: dup.pct }
 
+  // 打分口径统一放在 scoring.js，闯关模式共用同一套关联词典 + 向量兜底
   const exact = word === g.word
-  // 关联词典优先：作者分层的邻居直接给热度，补上模型对常识关联的盲区
-  // （企鹅→南极 4、玫瑰→月季 7 这种情况）。表里没有的词才回落到向量算。
-  const authored = exact ? null : assocOf(g.word)?.get(word)
-  let pct
-  if (exact) pct = 100
-  else if (authored != null) pct = Math.min(99, authored)
-  else {
-    const tv = await embedWord(g.word)
-    const gv = await embedWord(word)
-    pct = Math.min(99, score(cos(tv, gv), g.base, overlap(g.word, word)))
-  }
+  const pct = await rateGuess(g.word, g.base, word)
   g.guesses.push({ word, pct, by, byId, at: Date.now() })
   if (exact) {
     g.finished = true
@@ -253,6 +246,9 @@ function checkAsk(raw) {
 }
 
 // ---------- REST ----------
+// 闯关模式：私有会话 + 领域排行榜，和公共房间的 /ws 广播互不影响
+app.use('/api/challenge', challengeRouter)
+
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, ready: isReady(), games: games.size, players: players.size, assoc: assocStats().targets })
 })
@@ -291,7 +287,7 @@ app.post('/api/guess', async (req, res) => {
   if (limited(req.ip)) return res.status(429).json({ error: '猜得太快了，歇一下' })
 
   const r = await doGuess(g, word, 'API', null)
-  const category = config.categoryHint && g.guesses.length >= config.categoryAt ? g.category : null
+  const category = progress(g).category
   if (r.dup) {
     return res.json({
       pct: r.pct,
@@ -325,6 +321,7 @@ app.post('/api/ask', async (req, res) => {
 
   try {
     const r = await doAsk(g, v.q, 'API', null)
+    if (r.full) return res.status(403).json({ error: '这局的是非题用完了，切到猜词收尾吧' })
     if (r.dup) return res.json({ yes: r.yes, dup: true, asked: g.questions.length, questionLimit: config.questions })
     if (!g.private && g.id === room.gameId) broadcastState()
     res.json({ yes: r.yes, dup: false, asked: g.questions.length, questionLimit: config.questions })
@@ -400,12 +397,12 @@ const adminPage = `<!doctype html>
   <div class="sub">改动立即生效并向所有在线玩家广播，无需重启</div>
   <div class="card">
     <div class="row">
-      <label><b>猜词次数上限</b><small>向量近似度猜词，每局可用次数</small></label>
-      <input type="number" id="attempts" min="1" max="200" />
+      <label><b>问一问次数上限</b><small>主玩法：每局是非题额度（0 = 关闭提问）</small></label>
+      <input type="number" id="questions" min="0" max="50" />
     </div>
     <div class="row">
-      <label><b>问一问次数上限</b><small>每局是非题额度（0 = 禁用提问）</small></label>
-      <input type="number" id="questions" min="0" max="50" />
+      <label><b>猜词次数上限</b><small>辅助玩法：最后用猜词锁定答案</small></label>
+      <input type="number" id="attempts" min="1" max="200" />
     </div>
   </div>
   <div class="card">
@@ -418,7 +415,7 @@ const adminPage = `<!doctype html>
       <span class="switch"><input type="checkbox" id="categoryHint" /><i></i></span>
     </div>
     <div class="row">
-      <label><b>猜几次后提示分类</b><small>分类提示开启时生效</small></label>
+      <label><b>玩几步后提示分类</b><small>问一句 / 猜词都算一步</small></label>
       <input type="number" id="categoryAt" min="0" max="200" />
     </div>
   </div>
@@ -543,7 +540,7 @@ wss.on('connection', (ws, req) => {
         if (limited(ip)) return sendNotice(ws, 'error', '问得太快了，歇一下')
         doAsk(g, v.q, me.name, me.id)
           .then((r) => {
-            if (r.full) return sendNotice(ws, 'error', `这局只有 ${config.questions} 个问题，省着点问`)
+            if (r.full) return sendNotice(ws, 'error', config.questions ? `这局 ${config.questions} 个问题用完了，切到猜词收尾吧` : '本局关闭了提问，用猜词吧')
             if (r.dup) return sendNotice(ws, 'dup', '这个问题问过了')
             broadcastState()
           })

@@ -19,6 +19,7 @@ const errs = []
 p.on('pageerror', (e) => errs.push(e.message))
 await p.goto(B, { waitUntil: 'networkidle' })
 await p.waitForTimeout(1200)
+await p.locator('.mode-btn', { hasText: '猜词' }).click()
 
 for (const w of ['情人节', '花', '刺', '月季']) {
   await p.fill('.entry input', w)

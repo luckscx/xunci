@@ -45,6 +45,7 @@ p.on('response', async (res) => {
 
 await p.goto(URL, { waitUntil: 'networkidle' })
 await p.waitForSelector('.chip.cat')
+await p.locator('.mode-btn', { hasText: '猜词' }).click()
 await p.waitForTimeout(300)
 console.log('本局答案（QA 可见）:', answer, '/ 分类', category)
 

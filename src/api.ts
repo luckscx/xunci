@@ -29,6 +29,8 @@ export type RoomState = {
   type: 'state'
   now: number
   ready: boolean
+  /** 判官（问一问）是否可用；缺失时按可用处理，兼容旧服务端 */
+  judgeReady?: boolean
   game: RoomGame | null
   players: Player[]
 }
@@ -52,12 +54,96 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
   return data as T
 }
 
+async function get<T>(path: string): Promise<T> {
+  const res = await fetch(path)
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const err = new Error((data as { error?: string }).error || '网络开小差了') as Error & { status: number }
+    err.status = res.status
+    throw err
+  }
+  return data as T
+}
+
 /** 开一局新的公共房间局（服务端会向所有客户端广播） */
 export const newGame = () => post<NewGame>('/api/game')
 
 /** 拉取当前房间快照（模型加载期间的轮询兜底） */
 export async function roomState(): Promise<RoomState> {
-  const res = await fetch('/api/state')
-  if (!res.ok) throw new Error('状态拉取失败')
-  return (await res.json()) as RoomState
+  return get<RoomState>('/api/state')
 }
+
+// ---------- 闯关模式 ----------
+export type ChallengeRules = {
+  levels: number
+  timeLimitMs: number
+  guessLimit: number
+  perGuessSeconds: number
+  hintAfter: number
+}
+/** 聚合后的领域：把词库里几个相近的细分分类收成一组 */
+export type ChallengeDomain = { name: string; count: number; groups: string[] }
+export type ChallengeLevel = {
+  state: 'cleared' | 'active' | 'locked'
+  answer: string | null
+  guesses: number
+  difficulty: number
+}
+export type ChallengeGuessEntry = { word: string; pct: number; at: number }
+export type ChallengeResult = 'cleared' | 'timeout' | 'exhausted' | 'abandoned' | null
+
+export type ChallengeState = {
+  id: string
+  /** 聚合领域名（沿用 category 字段名） */
+  category: string
+  name: string
+  playerId: string
+  total: number
+  index: number
+  level: number
+  levels: ChallengeLevel[]
+  /** 当前这一题猜过的词 */
+  guesses: ChallengeGuessEntry[]
+  used: number
+  guessLimit: number
+  startedAt: number
+  deadline: number
+  /** 服务端时钟，前端据此抵消本地时钟偏差 */
+  now: number
+  rules: ChallengeRules
+  hint: { chars: number } | null
+  finished: boolean
+  result: ChallengeResult
+  finishedAt: number | null
+  elapsedMs: number
+  score: number | null
+  rank: number | null
+  devAnswers?: string[]
+}
+
+export type ChallengeGuessResult = ChallengeState & {
+  guess: { word: string; pct: number; exact: boolean; dup: boolean; level: number } | null
+}
+export type BoardEntry = {
+  rank: number
+  playerId: string
+  name: string
+  used: number
+  seconds: number
+  score: number
+  at: number
+}
+
+export const challengeDomains = () =>
+  get<{ domains: ChallengeDomain[]; rules: ChallengeRules }>('/api/challenge/categories')
+export const challengeLeaderboard = (domain: string) =>
+  get<{ domain: string; entries: BoardEntry[]; rules: ChallengeRules }>(
+    `/api/challenge/leaderboard?domain=${encodeURIComponent(domain)}`,
+  )
+export const challengeStart = (domain: string, me: Identity) =>
+  post<ChallengeState>('/api/challenge/start', { domain, playerId: me.id, name: me.name })
+export const challengeSession = (id: string) =>
+  get<ChallengeState>(`/api/challenge/session?id=${encodeURIComponent(id)}`)
+export const challengeGuess = (id: string, word: string) =>
+  post<ChallengeGuessResult>('/api/challenge/guess', { id, word })
+export const challengeAbandon = (id: string) => post<ChallengeState>('/api/challenge/abandon', { id })
