@@ -61,4 +61,6 @@
 .answers span { padding: 4px 9px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; color: var(--muted); }
 .answers span.ok { color: var(--warm); border-color: rgba(255,154,107,.3); }
 .panel-links { display: flex; justify-content: center; gap: 18px; margin-top: 12px; }
-@media (max-height: 700px) { .cat-btn { padding: 9px 8px; } .step { height: 24px; } }
+/* 小屏紧凑样式跟随 App.tsx 挂的 .compact，理由见 styles.css 同名注释 */
+.app.compact .cat-btn { padding: 9px 8px; }
+.app.compact .step { height: 24px; }

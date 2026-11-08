@@ -398,6 +398,24 @@ export default function Challenge({ me }: { me: api.Identity }) {
             </div>
           </section>
 
+          <form className="entry" onSubmit={(e) => void submit(e)}>
+            <input
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder={placeholder}
+              maxLength={mode === 'ask' ? 40 : 12}
+              disabled={disabled}
+              enterKeyHint="send"
+              autoComplete="off"
+            />
+            <button type="submit" disabled={disabled || !input.trim()}>
+              {busy ? '…' : mode === 'ask' ? '问一下' : '蹭一下'}
+            </button>
+          </form>
+
+          {err && <div className="err">{err}</div>}
+
           <section className="history">
             <div className="hhead">
               <span>第 {session.level} 题 · {mode === 'ask' ? '问过的是非题' : '猜过的词'}</span>
@@ -441,24 +459,6 @@ export default function Challenge({ me }: { me: api.Identity }) {
               <div className="empty">猜过的词和热度记在这里，蹭到 100 就自动进入下一题</div>
             )}
           </section>
-
-          <form className="entry" onSubmit={(e) => void submit(e)}>
-            <input
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder={placeholder}
-              maxLength={mode === 'ask' ? 40 : 12}
-              disabled={disabled}
-              enterKeyHint="send"
-              autoComplete="off"
-            />
-            <button type="submit" disabled={disabled || !input.trim()}>
-              {busy ? '…' : mode === 'ask' ? '问一下' : '蹭一下'}
-            </button>
-          </form>
-
-          {err && <div className="err">{err}</div>}
 
           <footer className="foot">
             <button className="ghost" onClick={() => void abandon()} disabled={session.finished || busy}>放弃本次</button>

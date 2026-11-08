@@ -47,6 +47,10 @@ export default function App() {
   const countRef = useRef(0)
   const startingRef = useRef(false)
 
+  // 小屏用紧凑样式，但只按「进页面时的高度」判断一次：
+  // 用 CSS 的 @media (max-height) 的话，键盘一弹出高度跌破阈值，整页会突然跳一下
+  const [compact] = useState(() => typeof window !== 'undefined' && window.innerHeight < 700)
+
   // 300ms 没回音出菊花并锁住操作；猜词 3 秒、问一问 8 秒到点自动解锁，别让玩家对着转圈干等
   const think = usePending({
     slowMs: SLOW_MS,
@@ -251,7 +255,7 @@ export default function App() {
 
   return (
     <div
-      className="app"
+      className={`app${compact ? ' compact' : ''}`}
       style={{
         ['--hue' as string]: view === 'challenge' ? '28' : String(hue),
         ['--heat' as string]: view === 'challenge' ? '0.14' : String(mode === 'ask' ? qHeat : heat),
@@ -360,6 +364,24 @@ export default function App() {
         </div>
       </section>
 
+      <form className="entry" onSubmit={submit}>
+        <input
+          ref={inputRef}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder={placeholder}
+          maxLength={mode === 'ask' ? 40 : 12}
+          disabled={disabled}
+          enterKeyHint="send"
+          autoComplete="off"
+        />
+        <button type="submit" disabled={disabled || !input.trim()}>
+          {busy ? '…' : mode === 'ask' ? '问一下' : '蹭一下'}
+        </button>
+      </form>
+
+      {err && <div className="err">{err}</div>}
+
       {/* 一个列表，跟着玩法走：问句按时间倒序，猜词按热度排序 */}
       <section className="history">
         <div className="hhead">
@@ -400,24 +422,6 @@ export default function App() {
           <div className="empty">问过的问题和判官的回答会记在这里，问得差不多就切到猜词收尾</div>
         )}
       </section>
-
-      <form className="entry" onSubmit={submit}>
-        <input
-          ref={inputRef}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder={placeholder}
-          maxLength={mode === 'ask' ? 40 : 12}
-          disabled={disabled}
-          enterKeyHint="send"
-          autoComplete="off"
-        />
-        <button type="submit" disabled={disabled || !input.trim()}>
-          {busy ? '…' : mode === 'ask' ? '问一下' : '蹭一下'}
-        </button>
-      </form>
-
-      {err && <div className="err">{err}</div>}
 
       <footer className="foot">
         {!over ? (

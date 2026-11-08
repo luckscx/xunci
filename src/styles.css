@@ -366,7 +366,8 @@ body {
   color: var(--faint);
 }
 
-/* 输入固定在底部，次要操作收成一行小字 */
+/* 输入放在上半屏：手机点输入框时键盘从下面顶上来，输入框离键盘远一点，
+   页面就不用为了「把输入框滚进可视区」而上下抖动 */
 .entry {
   display: flex;
   gap: 8px;
@@ -613,20 +614,20 @@ body {
   margin-top: 20px;
 }
 
-@media (max-height: 700px) {
-  .num {
-    font-size: 46px;
-  }
-  .gauge {
-    margin-top: 8px;
-    padding: 10px 14px 9px;
-  }
-  .hlist li {
-    padding: 5px 0;
-  }
-  .entry {
-    margin-top: 8px;
-  }
+/* 小屏紧凑样式：由 App.tsx 在首次加载时按 innerHeight < 700 判定并挂 .compact，
+   不用 @media (max-height)，否则键盘弹出把高度压下去时整页会跳一下 */
+.app.compact .num {
+  font-size: 46px;
+}
+.app.compact .gauge {
+  margin-top: 8px;
+  padding: 10px 14px 9px;
+}
+.app.compact .hlist li {
+  padding: 5px 0;
+}
+.app.compact .entry {
+  margin-top: 8px;
 }
 
 @media (prefers-reduced-motion: reduce) {
