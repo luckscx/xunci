@@ -1,4 +1,4 @@
-// 验证会话信息条：开始时间、用时（真的在走）、已猜次数
+// 验证顶栏「还剩 N 次」：随猜测递减，换局归零
 import { chromium } from 'playwright'
 
 const b = await chromium.launch()
@@ -10,27 +10,24 @@ p.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()) })
 
 await p.goto('http://127.0.0.1:3110', { waitUntil: 'networkidle' })
 await p.waitForSelector('.tally')
-const read = () =>
-  p.evaluate(() => {
-    const t = document.querySelector('.tally')?.textContent?.replace(/\s+/g, ' ').trim()
-    return t
-  })
+const read = () => p.evaluate(() => Number(document.querySelector('.tally b')?.textContent ?? -1))
 
-console.log('刚开局:', await read())
-await p.waitForTimeout(3200)
-console.log('等 3.2 秒:', await read())
+const first = await read()
+console.log('刚开局剩余:', first)
 
 for (const w of ['猫', '狗', '钢琴']) {
   await p.fill('.entry input', w)
   await p.click('.entry button')
   await p.waitForTimeout(420)
 }
-console.log('猜 3 次后:', await read())
+const after = await read()
+console.log('猜 3 次后剩余:', after, after === first - 3 ? '✓' : '✗ 次数没有正确递减')
 
-// 重置后应归零
+// 换局后应回到上限
 await p.click('.foot .ghost')
 await p.waitForTimeout(700)
-console.log('换一局后:', await read())
+const reset = await read()
+console.log('换一局后剩余:', reset, reset === first ? '✓' : '✗ 没有归零')
 
 await p.screenshot({ path: '/tmp/ciwen-tally.png' })
 console.log(errs.length ? 'ERR ' + errs.join(' | ') : 'no console errors')

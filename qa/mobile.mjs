@@ -74,17 +74,22 @@ for (const s of SIZES) {
   if (after.footBottom > after.vh + 0.5) console.log(`  ⚠️ ${s.name} 多行后底栏越界`)
   await page.screenshot({ path: `/tmp/ciwen-${s.name}-many.png` })
 
-  // 结束态：放弃 → 覆盖层
-  await page.click('.foot .danger')
-  await page.waitForTimeout(700)
-  const overlay = await page.evaluate(() => {
-    const p = document.querySelector('.overlay .panel')
-    if (!p) return null
-    const r = p.getBoundingClientRect()
-    return { answer: document.querySelector('.answer')?.textContent, top: Math.round(r.top), bottom: Math.round(r.bottom), vh: window.innerHeight }
-  })
-  console.log(`  ${s.name} 结算层`, JSON.stringify(overlay))
-  await page.screenshot({ path: `/tmp/ciwen-${s.name}-over.png` })
+  // 结束态：放弃 → 覆盖层（服务端可能关闭「看答案」，此时跳过）
+  const danger = page.locator('.foot .danger')
+  if (await danger.isEnabled()) {
+    await danger.click()
+    await page.waitForTimeout(700)
+    const overlay = await page.evaluate(() => {
+      const p = document.querySelector('.overlay .panel')
+      if (!p) return null
+      const r = p.getBoundingClientRect()
+      return { answer: document.querySelector('.answer')?.textContent, top: Math.round(r.top), bottom: Math.round(r.bottom), vh: window.innerHeight }
+    })
+    console.log(`  ${s.name} 结算层`, JSON.stringify(overlay))
+    await page.screenshot({ path: `/tmp/ciwen-${s.name}-over.png` })
+  } else {
+    console.log(`  ${s.name} 服务端关闭了「看答案」，跳过结算层检查`)
+  }
 
   await ctx.close()
 }

@@ -11,25 +11,3 @@ export function tempOf(pct: number): Temp {
   if (pct > 8) return { label: '凉', desc: '热度还没传过来', hue: 150 }
   return { label: '没蹭到', desc: '一点边都不沾', hue: 205 }
 }
-
-export type Stats = { plays: number; wins: number; bestPct: number; fewest: number }
-
-const KEY = 'xunci.stats.v1'
-
-export function loadStats(): Stats {
-  try {
-    const raw = JSON.parse(localStorage.getItem(KEY) || '') as Stats
-    if (typeof raw.plays === 'number') return raw
-  } catch {
-    /* ignore */
-  }
-  return { plays: 0, wins: 0, bestPct: 0, fewest: 0 }
-}
-
-export function saveStats(s: Stats) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(s))
-  } catch {
-    /* ignore */
-  }
-}

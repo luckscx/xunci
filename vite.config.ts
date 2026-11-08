@@ -6,6 +6,7 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5183,
+    allowedHosts: ['life.devcloud.woa.com'],
     proxy: {
       '/api': { target: 'http://127.0.0.1:3110', changeOrigin: true },
       '/ws': { target: 'ws://127.0.0.1:3110', ws: true },

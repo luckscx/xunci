@@ -1,3 +1,4 @@
+// 顶栏与玩法切换布局：静音按钮不越界，焦点卡不再有刻度
 import { chromium } from 'playwright'
 const b = await chromium.launch()
 const c = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true })
