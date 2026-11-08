@@ -56,6 +56,7 @@ export default function App() {
   const [err, setErr] = useState('')
   const [boot, setBoot] = useState('正在唤醒语言模型…')
   const [over, setOver] = useState<{ won: boolean; answer: string } | null>(null)
+  const [category, setCategory] = useState<string | null>(null)
   const [stats, setStats] = useState<Stats>(() => loadStats())
   const [copied, setCopied] = useState(false)
   const [muted, setMutedState] = useState(() => isMuted())
@@ -71,6 +72,7 @@ export default function App() {
     setInput('')
     setErr('')
     setGame(null)
+    setCategory(null)
     setEndedAt(null)
     setStartedAt(null)
     let delay = 800
@@ -149,11 +151,13 @@ export default function App() {
       const r = await api.guess(game.id, word)
       if (r.dup) {
         playDup()
+        if (r.category) setCategory(r.category)
         setErr(`「${word}」猜过了，换一个`)
         setInput('')
         return
       }
       setLast(r)
+      if (r.category) setCategory(r.category)
       setGuesses((prev) => [...prev, { word, pct: r.pct }])
       setInput('')
       // 数字滚动到落定再响，声音落在"揭晓"这一刻
@@ -184,7 +188,7 @@ export default function App() {
   async function copyResult() {
     if (!over) return
     const rows = sorted.slice(0, 6).map((g) => `${g.word} ${g.pct}`).join(' · ')
-    const text = `寻词蹭热度 · ${game?.category ?? ''}\n${over.won ? '蹭到了' : '没蹭上'}：${over.answer}\n${rows}`
+    const text = `寻词蹭热度 · ${category ?? ''}\n${over.won ? '蹭到了' : '没蹭上'}：${over.answer}\n${rows}`
     try {
       await navigator.clipboard.writeText(text)
       setCopied(true)
@@ -195,6 +199,8 @@ export default function App() {
   }
 
   const heat = Math.min(1, Math.max(0, pct / 100))
+  const catAt = game?.categoryAt ?? 10
+  const catLeft = Math.max(0, catAt - guesses.length)
 
   return (
     <div
@@ -228,8 +234,14 @@ export default function App() {
       </header>
 
       <div className="chips">
-        <span className="chip cat">{game ? `提示 · ${game.category}` : '…'}</span>
-        {last?.hint && <span className="chip">{last.hint.chars} 个字</span>}
+        {category ? (
+          <span className="chip cat unlocked">提示 · {category}</span>
+        ) : (
+          <span className="chip cat locked">
+            {game ? `分类 · 再猜 ${catLeft} 次解锁` : '分类 · …'}
+          </span>
+        )}
+        {last?.hint && <span className="chip">共 {last.hint.chars} 个字</span>}
       </div>
 
       <section className={`gauge ${hasGuess ? 'live' : ''}`}>

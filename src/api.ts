@@ -1,4 +1,4 @@
-export type NewGame = { id: string; category: string; difficulty: number; attempts: number }
+export type NewGame = { id: string; difficulty: number; attempts: number; categoryAt: number }
 export type GuessResult = {
   pct: number
   exact: boolean
@@ -8,6 +8,7 @@ export type GuessResult = {
   best: { word: string; pct: number } | null
   prev: number | null
   answer?: string
+  category?: string | null
   hint?: { chars: number } | null
 }
 

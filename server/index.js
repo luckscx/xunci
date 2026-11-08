@@ -8,6 +8,8 @@ import { pickTarget } from './words.js'
 const PORT = process.env.PORT || 3110
 const HOST = process.env.HOST || '0.0.0.0'
 const ATTEMPTS = 30
+// 分类提示要猜满这么多次才给：开局就知道分类等于把答案缩到十来个词里
+const CATEGORY_AT = 10
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
 const app = express()
@@ -80,9 +82,10 @@ app.post('/api/game', async (req, res) => {
   })
   res.json({
     id,
-    category: t.c,
     difficulty: t.d,
     attempts: ATTEMPTS,
+    categoryAt: CATEGORY_AT,
+    // 分类刻意不在开局下发：否则开局就等于把答案缩到十来个词里
     // 仅本地 QA 用：CIWEN_DEV_HINT=1 时返回答案，生产环境不设该变量
     ...(process.env.CIWEN_DEV_HINT === '1' ? { answer: t.w } : {}),
   })
@@ -107,6 +110,7 @@ app.post('/api/guess', async (req, res) => {
       attemptsLeft: ATTEMPTS - g.guesses.length,
       best: bestOf(g),
       prev: g.guesses.length > 1 ? g.guesses[g.guesses.length - 2].pct : null,
+      category: g.guesses.length >= CATEGORY_AT ? g.category : null,
     })
   }
 
@@ -127,6 +131,8 @@ app.post('/api/guess', async (req, res) => {
     attemptsLeft: ATTEMPTS - g.guesses.length,
     best: bestOf(g),
     prev,
+    // 分类提示：猜满 CATEGORY_AT 次才下发，之前的响应里根本不带这个字段
+    category: g.guesses.length >= CATEGORY_AT ? g.category : null,
     // 猜满一半后放出字数提示，给僵持的局一点抓手
     hint: !exact && g.guesses.length >= 15 ? { chars: g.word.length } : null,
     answer: exact || g.guesses.length >= ATTEMPTS ? g.word : undefined,
